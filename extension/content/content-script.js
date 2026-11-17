@@ -3,6 +3,14 @@
  * Detects and swaps faces on product images
  */
 
+console.log('⭐ StarringYou content script loaded');
+
+// E2E Testing: Hardcoded test face (will be overridden by real enrollment)
+const TEST_MODE = window.location.search.includes('test=true');
+const HARDCODED_TEST_FACE = '/sample-images/model-2.jpg';
+
+console.log('⭐ TEST_MODE:', TEST_MODE);
+
 // Extension state
 let extensionEnabled = false;
 let enrollmentData = null;
@@ -15,6 +23,16 @@ async function init() {
   const result = await chrome.storage.local.get(['enabled', 'enrollmentData', 'swapCache']);
   extensionEnabled = result.enabled || false;
   enrollmentData = result.enrollmentData || null;
+  
+  // E2E Test mode: use hardcoded test face
+  if (TEST_MODE && !enrollmentData) {
+    console.log('StarringYou: TEST MODE - using hardcoded test face');
+    extensionEnabled = true;
+    enrollmentData = {
+      frontalFrame: HARDCODED_TEST_FACE,
+      enrolledAt: Date.now()
+    };
+  }
   
   // Load cache from storage
   if (result.swapCache) {

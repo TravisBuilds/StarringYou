@@ -55,6 +55,39 @@ body {
   font-size: 1.1rem;
 }
 
+/* Info Banner */
+.info-banner {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 1.5rem;
+  margin: 1rem 0 2rem 0;
+  border-radius: 12px;
+  color: white;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+
+.info-section {
+  margin: 0.75rem 0;
+  line-height: 1.7;
+}
+
+.info-section:first-child {
+  margin-top: 0;
+}
+
+.info-section a {
+  color: #ffd700;
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+.info-section code {
+  background: rgba(0,0,0,0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
 /* Navigation */
 .app-nav {
   display: flex;

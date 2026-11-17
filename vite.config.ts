@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  // Use relative paths for local builds, or /starringyou/ for GitHub Pages
-  base: process.env.GITHUB_PAGES ? '/starringyou/' : './',
+  // GitHub Pages base path
+  base: '/StarringYou/',
   
   build: {
     // Ensure assets are referenced relatively

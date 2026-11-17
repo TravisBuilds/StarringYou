@@ -205,6 +205,12 @@ async function swapImageFace(img) {
       imageData
     );
 
+    // Skip if no face detected
+    if (!swappedDataUrl) {
+      console.log('StarringYou: Skipping image (no face)');
+      return;
+    }
+
     // Cache result
     swapCache.set(cacheKey, swappedDataUrl);
     await saveSwapCache();
@@ -235,55 +241,145 @@ async function fetchImageViaBackground(url) {
   });
 }
 
-// Perform simple face swap (overlay method)
+// Detect face in target image via background/offscreen
+async function detectFaceInImage(imageUrl) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { action: 'detectFaceInImage', imageUrl },
+      (response) => {
+        if (response && response.success) {
+          resolve(response);
+        } else {
+          reject(new Error(response?.error || 'Face detection failed'));
+        }
+      }
+    );
+  });
+}
+
+// Perform face swap with real face detection
 async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
-  return new Promise((resolve) => {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
+  return new Promise(async (resolve, reject) => {
+    try {
+      // Detect face in target image
+      console.log('StarringYou: Detecting face in target image...');
+      const targetFaceData = await detectFaceInImage(targetImageDataUrl);
+      
+      if (!targetFaceData.success) {
+        console.log('StarringYou: No face detected, skipping swap');
+        resolve(null); // Return null to skip this image
+        return;
+      }
+      
+      console.log('StarringYou: Face detected, swapping...');
+      
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
 
-    const sourceImg = new Image();
-    const targetImg = new Image();
+      const sourceImg = new Image();
+      const targetImg = new Image();
 
-    let sourceLoaded = false;
-    let targetLoaded = false;
+      let sourceLoaded = false;
+      let targetLoaded = false;
 
-    sourceImg.onload = () => {
-      sourceLoaded = true;
-      if (targetLoaded) draw();
-    };
+      sourceImg.onload = () => {
+        sourceLoaded = true;
+        if (targetLoaded) draw();
+      };
 
-    targetImg.onload = () => {
-      targetLoaded = true;
-      if (sourceLoaded) draw();
-    };
+      targetImg.onload = () => {
+        targetLoaded = true;
+        if (sourceLoaded) draw();
+      };
 
-    function draw() {
-      canvas.width = targetImg.width;
-      canvas.height = targetImg.height;
+      function draw() {
+        canvas.width = targetImg.width;
+        canvas.height = targetImg.height;
 
-      // Draw target image
-      ctx.drawImage(targetImg, 0, 0);
+        // Draw target image
+        ctx.drawImage(targetImg, 0, 0);
 
-      // Simple overlay - place source face in upper center
-      const faceSize = Math.min(targetImg.width, targetImg.height) * 0.25;
-      const x = (targetImg.width - faceSize) / 2;
-      const y = targetImg.height * 0.15;
+        // Get target face landmarks (in normalized coordinates)
+        const { keyPoints } = targetFaceData;
+        
+        // Convert normalized coordinates to pixels
+        const leftEye = {
+          x: keyPoints.leftEye.x * targetImg.width,
+          y: keyPoints.leftEye.y * targetImg.height
+        };
+        const rightEye = {
+          x: keyPoints.rightEye.x * targetImg.width,
+          y: keyPoints.rightEye.y * targetImg.height
+        };
+        
+        // Calculate face center, size, and rotation
+        const eyesCenterX = (leftEye.x + rightEye.x) / 2;
+        const eyesCenterY = (leftEye.y + rightEye.y) / 2;
+        const eyeDistance = Math.sqrt(
+          Math.pow(rightEye.x - leftEye.x, 2) + 
+          Math.pow(rightEye.y - leftEye.y, 2)
+        );
+        const faceWidth = eyeDistance * 2.5;
+        const faceHeight = faceWidth * 1.3;
+        const angle = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x);
+        
+        // Create elliptical feathered mask
+        const maskCanvas = document.createElement('canvas');
+        maskCanvas.width = Math.ceil(faceWidth * 2);
+        maskCanvas.height = Math.ceil(faceHeight * 2);
+        const maskCtx = maskCanvas.getContext('2d');
+        
+        const centerX = maskCanvas.width / 2;
+        const centerY = maskCanvas.height / 2;
+        const radiusX = faceWidth / 2;
+        const radiusY = faceHeight / 2;
+        
+        // Create radial gradient for feathering
+        const gradient = maskCtx.createRadialGradient(
+          centerX, centerY, Math.min(radiusX, radiusY) * 0.6,
+          centerX, centerY, Math.max(radiusX, radiusY)
+        );
+        gradient.addColorStop(0, 'rgba(255,255,255,1)');
+        gradient.addColorStop(0.8, 'rgba(255,255,255,1)');
+        gradient.addColorStop(1, 'rgba(255,255,255,0)');
+        
+        maskCtx.fillStyle = gradient;
+        maskCtx.beginPath();
+        maskCtx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+        maskCtx.fill();
+        
+        // Apply transformation and draw source face
+        ctx.save();
+        ctx.translate(eyesCenterX, eyesCenterY);
+        ctx.rotate(angle);
+        
+        // Draw source face scaled to match target face size
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(sourceImg, 
+          -faceWidth / 2, 
+          -faceHeight / 2, 
+          faceWidth, 
+          faceHeight
+        );
+        
+        // Apply mask for smooth blending
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(maskCanvas, 
+          -maskCanvas.width / 2, 
+          -maskCanvas.height / 2
+        );
+        
+        ctx.restore();
 
-      // Draw source face with some transparency
-      ctx.globalAlpha = 0.9;
-      ctx.drawImage(sourceImg, x, y, faceSize, faceSize);
-      ctx.globalAlpha = 1.0;
+        resolve(canvas.toDataURL('image/jpeg', 0.92));
+      }
 
-      // Add subtle indicator
-      ctx.font = '12px system-ui';
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-      ctx.fillText('⭐', targetImg.width - 20, 20);
-
-      resolve(canvas.toDataURL('image/jpeg', 0.9));
+      sourceImg.src = sourceFaceDataUrl;
+      targetImg.src = targetImageDataUrl;
+    } catch (error) {
+      console.error('StarringYou: Face swap error:', error);
+      reject(error);
     }
-
-    sourceImg.src = sourceFaceDataUrl;
-    targetImg.src = targetImageDataUrl;
   });
 }
 

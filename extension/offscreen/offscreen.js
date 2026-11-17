@@ -3,6 +3,8 @@
  * Runs in a separate context to use DOM/Canvas APIs with MV3
  */
 
+import { FilesetResolver, FaceLandmarker } from '@mediapipe/tasks-vision';
+
 console.log('[Offscreen] Script loading...');
 
 let faceLandmarker = null;
@@ -23,11 +25,6 @@ async function initializeFaceLandmarker() {
   console.log('[Offscreen] Initializing MediaPipe Face Landmarker...');
   
   try {
-    // Dynamic import of MediaPipe
-    const { FaceLandmarker, FilesetResolver } = await import(
-      chrome.runtime.getURL('mediapipe/wasm/vision_wasm_internal.js')
-    );
-    
     const vision = await FilesetResolver.forVisionTasks(
       chrome.runtime.getURL('mediapipe/wasm')
     );
@@ -44,7 +41,7 @@ async function initializeFaceLandmarker() {
       minTrackingConfidence: 0.5
     });
     
-    console.log('[Offscreen] MediaPipe initialized');
+    console.log('[Offscreen] MediaPipe initialized successfully');
     isInitializing = false;
     return faceLandmarker;
   } catch (error) {
@@ -74,12 +71,15 @@ async function detectFace(imageDataObj) {
     // Run detection
     const results = await faceLandmarker.detect(canvas);
     
+    console.log(`[Offscreen] Face detection result: ${results.faceLandmarks?.length || 0} faces detected`);
+    
     if (!results.faceLandmarks || results.faceLandmarks.length === 0) {
       return { success: false, error: 'No face detected' };
     }
     
     // Get first face
     const landmarks = results.faceLandmarks[0];
+    console.log('[Offscreen] Processing face landmarks...');
     
     // Calculate face bounding box
     let minX = 1, minY = 1, maxX = 0, maxY = 0;

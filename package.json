@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --port 43123",
     "build": "tsc && vite build",
+    "build:offscreen": "vite build --config vite.config.offscreen.ts",
     "preview": "vite preview",
     "test": "vitest",
     "e2e": "xvfb-run -a node scripts/e2e.mjs"

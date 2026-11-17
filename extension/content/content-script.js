@@ -20,6 +20,26 @@ let autoSwapMode = true;
 let swapCache = new Map();
 let cachedSourceData = null; // Cache processed source face data
 
+// Sequential processing queue
+const swapQueue = [];
+let isProcessingQueue = false;
+
+async function processSwapQueue() {
+  if (isProcessingQueue || swapQueue.length === 0) return;
+  
+  isProcessingQueue = true;
+  while (swapQueue.length > 0) {
+    const { img, resolve, reject } = swapQueue.shift();
+    try {
+      await swapImageFaceInternal(img);
+      resolve();
+    } catch (error) {
+      reject(error);
+    }
+  }
+  isProcessingQueue = false;
+}
+
 // Initialize
 async function init() {
   // Get initial state
@@ -182,8 +202,16 @@ function createToggleBadge(img, originalSrc) {
   return badge;
 }
 
-// Perform face swap on image
+// Queue swap for sequential processing
 async function swapImageFace(img) {
+  return new Promise((resolve, reject) => {
+    swapQueue.push({ img, resolve, reject });
+    processSwapQueue();
+  });
+}
+
+// Perform face swap on image (internal - called by queue)
+async function swapImageFaceInternal(img) {
   const startTime = performance.now();
   const originalSrc = img.src;
   
@@ -435,9 +463,13 @@ async function getCachedSourceData(sourceFaceDataUrl) {
   const sourceImg = new Image();
   await new Promise(r => { sourceImg.onload = r; sourceImg.src = sourceFaceDataUrl; });
   
+  // Use originalWidth/Height from detection result (image dimensions before downscaling)
+  const imgWidth = sourceFaceData.originalWidth || sourceImg.naturalWidth;
+  const imgHeight = sourceFaceData.originalHeight || sourceImg.naturalHeight;
+  
   const srcLandmarks = sourceFaceData.landmarks.map(p => ({
-    x: p.x * sourceImg.naturalWidth,
-    y: p.y * sourceImg.naturalHeight
+    x: p.x * imgWidth,
+    y: p.y * imgHeight
   }));
   
   // Compute source face properties
@@ -537,10 +569,12 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
       // Draw target image first
       ctx.drawImage(targetImg, 0, 0, canvas.width, canvas.height);
       
-      // Get target landmarks in pixel coordinates
+      // Get target landmarks in pixel coordinates (use original dimensions before downscaling)
+      const tgtWidth = targetFaceData.originalWidth || canvas.width;
+      const tgtHeight = targetFaceData.originalHeight || canvas.height;
       const tgtLandmarks = targetFaceData.landmarks.map(p => ({
-        x: p.x * canvas.width,
-        y: p.y * canvas.height
+        x: p.x * tgtWidth,
+        y: p.y * tgtHeight
       }));
       
       const tgtLeftEye = tgtLandmarks[33];
@@ -821,7 +855,9 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
         });
       }
       
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      // Convert to Blob and create object URL (faster than dataURL)
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.9));
+      const blobUrl = URL.createObjectURL(blob);
       timings.encodeEnd = performance.now();
       
       // Calculate breakdown
@@ -836,7 +872,7 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
       };
       console.log(`StarringYou: Timing breakdown (ms): detect=${breakdown.detect} mask=${breakdown.mask} color=${breakdown.color} warp=${breakdown.warp} blend=${breakdown.blend} encode=${breakdown.encode} total=${breakdown.total}`);
       
-      resolve(dataUrl);
+      resolve(blobUrl);
     } catch (error) {
       console.error('StarringYou: Face swap error:', error);
       reject(error);

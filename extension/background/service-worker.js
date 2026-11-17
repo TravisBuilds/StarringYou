@@ -115,7 +115,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
     return true; // Keep message channel open for async response
   } else if (request.action === 'detectFaceInImage') {
-    // Forward face detection to offscreen document
+    // Forward face detection to offscreen document (pass URL directly)
     (async () => {
       try {
         const ready = await setupOffscreenDocument();
@@ -123,27 +123,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           throw new Error('Offscreen document not available');
         }
         
-        // Fetch image as ImageData
-        const response = await fetch(request.imageUrl);
-        const blob = await response.blob();
-        const imageBitmap = await createImageBitmap(blob);
-        
-        // Create canvas to get ImageData
-        const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(imageBitmap, 0, 0);
-        const imageData = ctx.getImageData(0, 0, imageBitmap.width, imageBitmap.height);
-        
         console.log('Sending detection request to offscreen document...');
         
-        // Send to offscreen document for detection
+        // Send URL directly to offscreen for detection
         const result = await chrome.runtime.sendMessage({
           action: 'detectFace',
-          imageData: {
-            data: Array.from(imageData.data),
-            width: imageData.width,
-            height: imageData.height
-          }
+          imageUrl: request.imageUrl
         });
         
         console.log('Detection result:', result ? 'success' : 'failed');

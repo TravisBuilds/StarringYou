@@ -51,24 +51,27 @@ async function initializeFaceLandmarker() {
   }
 }
 
-// Detect face in an image
-async function detectFace(imageDataObj) {
+// Detect face in an image from URL
+async function detectFaceFromUrl(imageUrl) {
   try {
     await initializeFaceLandmarker();
     
-    // Reconstruct ImageData from serialized format
-    const imageData = new ImageData(
-      new Uint8ClampedArray(imageDataObj.data),
-      imageDataObj.width,
-      imageDataObj.height
-    );
+    // Fetch and load image
+    const response = await fetch(imageUrl);
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
     
-    // Create canvas from ImageData
-    const canvas = new OffscreenCanvas(imageData.width, imageData.height);
+    // Downscale to max 512px on long side for faster detection
+    const maxDim = Math.max(bitmap.width, bitmap.height);
+    const scale = Math.min(1, 512 / maxDim);
+    const scaledWidth = Math.round(bitmap.width * scale);
+    const scaledHeight = Math.round(bitmap.height * scale);
+    
+    const canvas = new OffscreenCanvas(scaledWidth, scaledHeight);
     const ctx = canvas.getContext('2d');
-    ctx.putImageData(imageData, 0, 0);
+    ctx.drawImage(bitmap, 0, 0, scaledWidth, scaledHeight);
     
-    // Run detection
+    // Run detection on downscaled image
     const results = await faceLandmarker.detect(canvas);
     
     console.log(`[Offscreen] Face detection result: ${results.faceLandmarks?.length || 0} faces detected`);
@@ -119,6 +122,8 @@ async function detectFace(imageDataObj) {
     return {
       success: true,
       landmarks: landmarks.map(p => ({ x: p.x, y: p.y, z: p.z })),
+      originalWidth: bitmap.width,
+      originalHeight: bitmap.height,
       boundingBox: {
         x: minX,
         y: minY,
@@ -146,10 +151,17 @@ async function detectFace(imageDataObj) {
 // Listen for messages from service worker
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'detectFace') {
-    detectFace(request.imageData)
+    detectFaceFromUrl(request.imageUrl)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true; // Keep channel open for async response
+  }
+  
+  if (request.action === 'performSwap') {
+    performSwapInOffscreen(request.sourceUrl, request.targetUrl)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
   }
 });
 

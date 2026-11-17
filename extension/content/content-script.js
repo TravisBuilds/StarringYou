@@ -8,8 +8,10 @@ console.log('⭐ StarringYou content script loaded');
 // E2E Testing: Hardcoded test face (will be overridden by real enrollment)
 const TEST_MODE = window.location.search.includes('test=true');
 const HARDCODED_TEST_FACE = 'http://localhost:8765/public/sample-images/model-2.jpg';
+const DEBUG_MODE = window.location.search.includes('debug=true');
 
 console.log('⭐ TEST_MODE:', TEST_MODE);
+console.log('⭐ DEBUG_MODE:', DEBUG_MODE);
 
 // Extension state
 let extensionEnabled = false;
@@ -257,125 +259,169 @@ async function detectFaceInImage(imageUrl) {
   });
 }
 
-// Perform face swap with real face detection
+// Get face oval landmark indices (MediaPipe 478-point mesh)
+const FACE_OVAL_INDICES = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+  397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
+  172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
+];
+
+// Perform face swap with proper landmark-based alignment
 async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
   return new Promise(async (resolve, reject) => {
     try {
-      // Detect face in target image
-      console.log('StarringYou: Detecting face in target image...');
-      const targetFaceData = await detectFaceInImage(targetImageDataUrl);
+      // Detect faces in both source and target
+      console.log('StarringYou: Detecting faces...');
+      const [sourceFaceData, targetFaceData] = await Promise.all([
+        detectFaceInImage(sourceFaceDataUrl),
+        detectFaceInImage(targetImageDataUrl)
+      ]);
       
       if (!targetFaceData.success) {
-        console.log('StarringYou: No face detected, skipping swap');
-        resolve(null); // Return null to skip this image
+        console.log('StarringYou: No face in target, skipping');
+        resolve(null);
         return;
       }
       
-      console.log('StarringYou: Face detected, swapping...');
+      if (!sourceFaceData.success) {
+        console.log('StarringYou: No face in source, using fallback');
+        resolve(null);
+        return;
+      }
+      
+      console.log('StarringYou: Both faces detected, aligning...');
       
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
-
       const sourceImg = new Image();
       const targetImg = new Image();
-
-      let sourceLoaded = false;
-      let targetLoaded = false;
-
-      sourceImg.onload = () => {
-        sourceLoaded = true;
-        if (targetLoaded) draw();
+      
+      await Promise.all([
+        new Promise(r => { sourceImg.onload = r; sourceImg.src = sourceFaceDataUrl; }),
+        new Promise(r => { targetImg.onload = r; targetImg.src = targetImageDataUrl; })
+      ]);
+      
+      // Set canvas to target image size
+      canvas.width = targetImg.naturalWidth;
+      canvas.height = targetImg.naturalHeight;
+      
+      // Draw target image first
+      ctx.drawImage(targetImg, 0, 0, canvas.width, canvas.height);
+      
+      // Get landmarks in pixel coordinates
+      const srcLandmarks = sourceFaceData.landmarks.map(p => ({
+        x: p.x * sourceImg.naturalWidth,
+        y: p.y * sourceImg.naturalHeight
+      }));
+      
+      const tgtLandmarks = targetFaceData.landmarks.map(p => ({
+        x: p.x * canvas.width,
+        y: p.y * canvas.height
+      }));
+      
+      // Extract key points for alignment
+      const srcLeftEye = srcLandmarks[33];
+      const srcRightEye = srcLandmarks[263];
+      const srcMouth = srcLandmarks[13];
+      const tgtLeftEye = tgtLandmarks[33];
+      const tgtRightEye = tgtLandmarks[263];
+      const tgtMouth = tgtLandmarks[13];
+      
+      // Compute similarity transform (scale, rotate, translate)
+      const srcEyeCenter = { 
+        x: (srcLeftEye.x + srcRightEye.x) / 2,
+        y: (srcLeftEye.y + srcRightEye.y) / 2
       };
-
-      targetImg.onload = () => {
-        targetLoaded = true;
-        if (sourceLoaded) draw();
+      const tgtEyeCenter = {
+        x: (tgtLeftEye.x + tgtRightEye.x) / 2,
+        y: (tgtLeftEye.y + tgtRightEye.y) / 2
       };
-
-      function draw() {
-        canvas.width = targetImg.width;
-        canvas.height = targetImg.height;
-
-        // Draw target image
-        ctx.drawImage(targetImg, 0, 0);
-
-        // Get target face landmarks (in normalized coordinates)
-        const { keyPoints } = targetFaceData;
-        
-        // Convert normalized coordinates to pixels
-        const leftEye = {
-          x: keyPoints.leftEye.x * targetImg.width,
-          y: keyPoints.leftEye.y * targetImg.height
-        };
-        const rightEye = {
-          x: keyPoints.rightEye.x * targetImg.width,
-          y: keyPoints.rightEye.y * targetImg.height
-        };
-        
-        // Calculate face center, size, and rotation
-        const eyesCenterX = (leftEye.x + rightEye.x) / 2;
-        const eyesCenterY = (leftEye.y + rightEye.y) / 2;
-        const eyeDistance = Math.sqrt(
-          Math.pow(rightEye.x - leftEye.x, 2) + 
-          Math.pow(rightEye.y - leftEye.y, 2)
-        );
-        const faceWidth = eyeDistance * 2.5;
-        const faceHeight = faceWidth * 1.3;
-        const angle = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x);
-        
-        // Create elliptical feathered mask
-        const maskCanvas = document.createElement('canvas');
-        maskCanvas.width = Math.ceil(faceWidth * 2);
-        maskCanvas.height = Math.ceil(faceHeight * 2);
-        const maskCtx = maskCanvas.getContext('2d');
-        
-        const centerX = maskCanvas.width / 2;
-        const centerY = maskCanvas.height / 2;
-        const radiusX = faceWidth / 2;
-        const radiusY = faceHeight / 2;
-        
-        // Create radial gradient for feathering
-        const gradient = maskCtx.createRadialGradient(
-          centerX, centerY, Math.min(radiusX, radiusY) * 0.6,
-          centerX, centerY, Math.max(radiusX, radiusY)
-        );
-        gradient.addColorStop(0, 'rgba(255,255,255,1)');
-        gradient.addColorStop(0.8, 'rgba(255,255,255,1)');
-        gradient.addColorStop(1, 'rgba(255,255,255,0)');
-        
-        maskCtx.fillStyle = gradient;
-        maskCtx.beginPath();
-        maskCtx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
-        maskCtx.fill();
-        
-        // Apply transformation and draw source face
-        ctx.save();
-        ctx.translate(eyesCenterX, eyesCenterY);
-        ctx.rotate(angle);
-        
-        // Draw source face scaled to match target face size
+      
+      const srcEyeDist = Math.hypot(srcRightEye.x - srcLeftEye.x, srcRightEye.y - srcLeftEye.y);
+      const tgtEyeDist = Math.hypot(tgtRightEye.x - tgtLeftEye.x, tgtRightEye.y - tgtLeftEye.y);
+      const scale = tgtEyeDist / srcEyeDist;
+      
+      const srcAngle = Math.atan2(srcRightEye.y - srcLeftEye.y, srcRightEye.x - srcLeftEye.x);
+      const tgtAngle = Math.atan2(tgtRightEye.y - tgtLeftEye.y, tgtRightEye.x - tgtLeftEye.x);
+      const rotation = tgtAngle - srcAngle;
+      
+      // Crop source face region
+      const srcFaceOval = FACE_OVAL_INDICES.map(i => srcLandmarks[i]);
+      const srcMinX = Math.min(...srcFaceOval.map(p => p.x));
+      const srcMaxX = Math.max(...srcFaceOval.map(p => p.x));
+      const srcMinY = Math.min(...srcFaceOval.map(p => p.y));
+      const srcMaxY = Math.max(...srcFaceOval.map(p => p.y));
+      const srcWidth = srcMaxX - srcMinX;
+      const srcHeight = srcMaxY - srcMinY;
+      
+      // Create source face crop canvas
+      const srcCropCanvas = document.createElement('canvas');
+      srcCropCanvas.width = srcWidth * 1.2;
+      srcCropCanvas.height = srcHeight * 1.2;
+      const srcCropCtx = srcCropCanvas.getContext('2d');
+      srcCropCtx.drawImage(sourceImg, 
+        srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1, 
+        srcWidth * 1.2, srcHeight * 1.2,
+        0, 0, srcCropCanvas.width, srcCropCanvas.height
+      );
+      
+      // Create mask from target face oval
+      const tgtFaceOval = FACE_OVAL_INDICES.map(i => tgtLandmarks[i]);
+      const featherWidth = tgtEyeDist * 0.07;
+      
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = canvas.width;
+      maskCanvas.height = canvas.height;
+      const maskCtx = maskCanvas.getContext('2d');
+      
+      // Draw feathered polygon mask
+      maskCtx.shadowBlur = featherWidth;
+      maskCtx.shadowColor = 'white';
+      maskCtx.fillStyle = 'white';
+      maskCtx.beginPath();
+      maskCtx.moveTo(tgtFaceOval[0].x, tgtFaceOval[0].y);
+      tgtFaceOval.forEach(p => maskCtx.lineTo(p.x, p.y));
+      maskCtx.closePath();
+      maskCtx.fill();
+      maskCtx.shadowBlur = 0;
+      maskCtx.fill();
+      
+      // Draw transformed source face
+      ctx.save();
+      ctx.translate(tgtEyeCenter.x, tgtEyeCenter.y);
+      ctx.rotate(rotation);
+      ctx.scale(scale, scale);
+      ctx.translate(-srcEyeCenter.x, -srcEyeCenter.y);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(srcCropCanvas, srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1);
+      ctx.restore();
+      
+      // Apply mask
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(maskCanvas, 0, 0);
+      
+      // Restore target background with composited face
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.drawImage(targetImg, 0, 0, canvas.width, canvas.height);
+      
+      // Debug mode: draw landmarks
+      if (DEBUG_MODE) {
         ctx.globalCompositeOperation = 'source-over';
-        ctx.drawImage(sourceImg, 
-          -faceWidth / 2, 
-          -faceHeight / 2, 
-          faceWidth, 
-          faceHeight
-        );
-        
-        // Apply mask for smooth blending
-        ctx.globalCompositeOperation = 'destination-in';
-        ctx.drawImage(maskCanvas, 
-          -maskCanvas.width / 2, 
-          -maskCanvas.height / 2
-        );
-        
-        ctx.restore();
-
-        resolve(canvas.toDataURL('image/jpeg', 0.92));
+        ctx.fillStyle = 'red';
+        tgtLandmarks.forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.fillStyle = 'lime';
+        [tgtLeftEye, tgtRightEye, tgtMouth].forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        });
       }
-
-      sourceImg.src = sourceFaceDataUrl;
-      targetImg.src = targetImageDataUrl;
+      
+      resolve(canvas.toDataURL('image/jpeg', 0.92));
     } catch (error) {
       console.error('StarringYou: Face swap error:', error);
       reject(error);

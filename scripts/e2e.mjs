@@ -118,9 +118,9 @@ async function runE2E() {
     page.on('console', msg => logToFile(`[Page] ${msg.text()}`));
     page.on('pageerror', err => logToFile(`[Error] ${err.message}`));
     
-    // Navigate to fixture page with test mode enabled
+    // Navigate to fixture page with test and debug mode enabled
     logToFile('📄 Loading fixture page...');
-    await page.goto('http://localhost:8765/test-fixtures/product-page.html?test=true');
+    await page.goto('http://localhost:8765/test-fixtures/product-page.html?test=true&debug=true');
     await page.waitForLoadState('networkidle');
     
     // Take before screenshot
@@ -139,6 +139,35 @@ async function runE2E() {
       path: '/cursor/stores/self/e2e-after.png',
       fullPage: true 
     });
+    
+    // Capture individual product images
+    logToFile('📸 Capturing individual product images...');
+    const productImages = await page.evaluate(() => {
+      const images = Array.from(document.querySelectorAll('.product-image'));
+      return images.map((img, index) => ({
+        index,
+        src: img.src,
+        swapped: img.getAttribute('data-starringyou-swapped'),
+        width: img.naturalWidth,
+        height: img.naturalHeight
+      }));
+    });
+    
+    // Screenshot each product card
+    for (let i = 0; i < Math.min(productImages.length, 5); i++) {
+      const img = productImages[i];
+      try {
+        const card = await page.$$(`.product-card`);
+        if (card[i]) {
+          await card[i].screenshot({
+            path: `/cursor/stores/self/swap-${i}-after.png`
+          });
+          logToFile(`  → Saved swap-${i}-after.png`);
+        }
+      } catch (e) {
+        logToFile(`  ⚠️  Failed to capture product ${i}: ${e.message}`);
+      }
+    }
     
     // Check for swapped images
     const swappedCount = await page.evaluate(() => {

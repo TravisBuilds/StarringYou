@@ -181,7 +181,37 @@ async function runE2E() {
     
     // Create page and navigate to test fixture with test mode enabled
     const page = await context.newPage();
-    page.on('console', msg => logToFile(`[Page] ${msg.text()}`));
+    page.on('console', msg => {
+      const text = msg.text();
+      logToFile(`[Page] ${text}`);
+      
+      // Capture debug exports
+      if (text.startsWith('DEBUG_EXPORTS')) {
+        msg.args()[1].jsonValue().then(debugData => {
+          const { target, warpedSource, mask, result } = debugData;
+          if (target) {
+            const targetData = target.split(',')[1];
+            writeFileSync('/cursor/stores/self/debug-a-target.png', Buffer.from(targetData, 'base64'));
+            logToFile('📸 Saved debug-a-target.png');
+          }
+          if (warpedSource) {
+            const sourceData = warpedSource.split(',')[1];
+            writeFileSync('/cursor/stores/self/debug-b-warped-source.png', Buffer.from(sourceData, 'base64'));
+            logToFile('📸 Saved debug-b-warped-source.png');
+          }
+          if (mask) {
+            const maskData = mask.split(',')[1];
+            writeFileSync('/cursor/stores/self/debug-c-mask.png', Buffer.from(maskData, 'base64'));
+            logToFile('📸 Saved debug-c-mask.png');
+          }
+          if (result) {
+            const resultData = result.split(',')[1];
+            writeFileSync('/cursor/stores/self/debug-d-result.png', Buffer.from(resultData, 'base64'));
+            logToFile('📸 Saved debug-d-result.png');
+          }
+        }).catch(err => logToFile(`Failed to save debug images: ${err}`));
+      }
+    });
     page.on('pageerror', err => logToFile(`[Error] ${err.message}`));
     
     // Navigate to fixture page (using enrolled face from onboarding)

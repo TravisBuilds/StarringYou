@@ -248,7 +248,8 @@ async function swapImageFace(img) {
     // Perform simple swap
     const swappedDataUrl = await performSimpleSwap(
       selectedFrame.dataUrl,
-      imageData
+      imageData,
+      originalSrc
     );
 
     // Skip if no face detected
@@ -370,10 +371,10 @@ const INNER_FACE_INDICES = [
 ];
 
 // Perform face swap with proper landmark-based alignment
-async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
+async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOriginalUrl) {
   return new Promise(async (resolve, reject) => {
     try {
-      console.log('SWAP_PIPELINE_V20_RUN15');
+      console.log('SWAP_PIPELINE_V21_DEBUG');
       // Detect faces in both source and target
       console.log('StarringYou: Detecting faces...');
       const [sourceFaceData, targetFaceData] = await Promise.all([
@@ -423,27 +424,58 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
         y: p.y * canvas.height
       }));
       
-      // Extract key points for alignment
+      // Extract key points for alignment - use more stable landmarks
       const srcLeftEye = srcLandmarks[33];
       const srcRightEye = srcLandmarks[263];
-      const srcMouth = srcLandmarks[13];
+      const srcNoseTip = srcLandmarks[1];
+      const srcMouthLeft = srcLandmarks[61];
+      const srcMouthRight = srcLandmarks[291];
+      const srcChin = srcLandmarks[152];
+      
       const tgtLeftEye = tgtLandmarks[33];
       const tgtRightEye = tgtLandmarks[263];
-      const tgtMouth = tgtLandmarks[13];
+      const tgtNoseTip = tgtLandmarks[1];
+      const tgtMouthLeft = tgtLandmarks[61];
+      const tgtMouthRight = tgtLandmarks[291];
+      const tgtChin = tgtLandmarks[152];
       
-      // Compute similarity transform (scale, rotate, translate)
+      // Compute similarity transform using eye center, mouth center, and chin
       const srcEyeCenter = { 
         x: (srcLeftEye.x + srcRightEye.x) / 2,
         y: (srcLeftEye.y + srcRightEye.y) / 2
       };
+      const srcMouthCenter = {
+        x: (srcMouthLeft.x + srcMouthRight.x) / 2,
+        y: (srcMouthLeft.y + srcMouthRight.y) / 2
+      };
+      const srcFaceCenter = {
+        x: (srcEyeCenter.x + srcMouthCenter.x + srcChin.x) / 3,
+        y: (srcEyeCenter.y + srcMouthCenter.y + srcChin.y) / 3
+      };
+      
       const tgtEyeCenter = {
         x: (tgtLeftEye.x + tgtRightEye.x) / 2,
         y: (tgtLeftEye.y + tgtRightEye.y) / 2
       };
+      const tgtMouthCenter = {
+        x: (tgtMouthLeft.x + tgtMouthRight.x) / 2,
+        y: (tgtMouthLeft.y + tgtMouthRight.y) / 2
+      };
+      const tgtFaceCenter = {
+        x: (tgtEyeCenter.x + tgtMouthCenter.x + tgtChin.x) / 3,
+        y: (tgtEyeCenter.y + tgtMouthCenter.y + tgtChin.y) / 3
+      };
       
+      // Calculate scale from eye-to-chin distance for better vertical coverage
+      const srcFaceHeight = Math.hypot(srcEyeCenter.x - srcChin.x, srcEyeCenter.y - srcChin.y);
+      const tgtFaceHeight = Math.hypot(tgtEyeCenter.x - tgtChin.x, tgtEyeCenter.y - tgtChin.y);
       const srcEyeDist = Math.hypot(srcRightEye.x - srcLeftEye.x, srcRightEye.y - srcLeftEye.y);
       const tgtEyeDist = Math.hypot(tgtRightEye.x - tgtLeftEye.x, tgtRightEye.y - tgtLeftEye.y);
-      const scale = tgtEyeDist / srcEyeDist;
+      
+      // Use average of width and height scaling for better fit
+      const scaleWidth = tgtEyeDist / srcEyeDist;
+      const scaleHeight = tgtFaceHeight / srcFaceHeight;
+      const scale = (scaleWidth + scaleHeight) / 2;
       
       const srcAngle = Math.atan2(srcRightEye.y - srcLeftEye.y, srcRightEye.x - srcLeftEye.x);
       const tgtAngle = Math.atan2(tgtRightEye.y - tgtLeftEye.y, tgtRightEye.x - tgtLeftEye.x);
@@ -584,10 +616,10 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
       
       // Draw transformed source face with color correction
       ctx.save();
-      ctx.translate(tgtEyeCenter.x, tgtEyeCenter.y);
+      ctx.translate(tgtFaceCenter.x, tgtFaceCenter.y);
       ctx.rotate(rotation);
       ctx.scale(scale, scale);
-      ctx.translate(-srcEyeCenter.x, -srcEyeCenter.y);
+      ctx.translate(-srcFaceCenter.x, -srcFaceCenter.y);
       ctx.globalCompositeOperation = 'source-over';
       ctx.drawImage(srcFaceCanvas, srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1);
       ctx.restore();
@@ -599,6 +631,35 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
       // Restore target background with composited face
       ctx.globalCompositeOperation = 'destination-over';
       ctx.drawImage(targetImg, 0, 0, canvas.width, canvas.height);
+      
+      // Debug exports for model-2
+      if (targetOriginalUrl && targetOriginalUrl.includes('model-2')) {
+        // Export intermediate stages
+        const debugTarget = document.createElement('canvas');
+        debugTarget.width = canvas.width;
+        debugTarget.height = canvas.height;
+        const debugCtx = debugTarget.getContext('2d');
+        debugCtx.drawImage(targetImg, 0, 0);
+        
+        const debugWarpedSource = document.createElement('canvas');
+        debugWarpedSource.width = canvas.width;
+        debugWarpedSource.height = canvas.height;
+        const warpedCtx = debugWarpedSource.getContext('2d');
+        warpedCtx.save();
+        warpedCtx.translate(tgtFaceCenter.x, tgtFaceCenter.y);
+        warpedCtx.rotate(rotation);
+        warpedCtx.scale(scale, scale);
+        warpedCtx.translate(-srcFaceCenter.x, -srcFaceCenter.y);
+        warpedCtx.drawImage(srcFaceCanvas, srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1);
+        warpedCtx.restore();
+        
+        console.log('DEBUG_EXPORTS', {
+          target: debugTarget.toDataURL('image/png'),
+          warpedSource: debugWarpedSource.toDataURL('image/png'),
+          mask: maskCanvas.toDataURL('image/png'),
+          result: canvas.toDataURL('image/png')
+        });
+      }
       
       // Debug mode: draw landmarks
       if (DEBUG_MODE) {

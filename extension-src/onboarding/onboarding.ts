@@ -48,19 +48,18 @@ class OnboardingPage {
     try {
       this.startBtn.style.display = 'none';
       this.deleteBtn.style.display = 'none';
+      this.instructionElement.textContent = 'Starting enrollment...';
       
       // Initialize enrollment engine
-      this.engine = new EnrollmentEngine(
-        this.videoElement,
-        this.canvasElement,
-        (status) => this.onProgress(status),
-        (data) => this.onComplete(data)
-      );
+      this.engine = new EnrollmentEngine();
+      this.engine.onStatusUpdate((status) => this.onProgress(status));
+      this.engine.onComplete((data) => this.onComplete(data));
 
-      await this.engine.initialize();
-      await this.engine.start();
+      console.log('Initializing enrollment engine...');
+      await this.engine.initialize(this.videoElement, this.canvasElement);
+      console.log('Starting enrollment...');
+      this.engine.start();
       
-      this.instructionElement.textContent = 'Starting enrollment...';
     } catch (error) {
       console.error('Enrollment error:', error);
       this.instructionElement.textContent = 'Error: ' + (error as Error).message;
@@ -69,20 +68,28 @@ class OnboardingPage {
   }
 
   private onProgress(status: { 
-    currentStep: number; 
+    state: string;
+    currentStepIndex: number; 
+    currentStepId: string;
     instruction: string; 
     progress: number;
-    pose?: HeadPose;
+    holdProgress: number;
+    detectedPose: HeadPose | null;
+    faceDetected: boolean;
+    poseMatched: boolean;
+    errorMessage?: string;
   }) {
+    console.log('[Onboarding] onProgress:', status.instruction, `(step ${status.currentStepIndex})`);
+    
     // Update instruction
     this.instructionElement.textContent = status.instruction;
 
     // Update step indicators
     this.stepIndicators.forEach((dot, idx) => {
       dot.classList.remove('active', 'completed');
-      if (idx < status.currentStep) {
+      if (idx < status.currentStepIndex) {
         dot.classList.add('completed');
-      } else if (idx === status.currentStep) {
+      } else if (idx === status.currentStepIndex) {
         dot.classList.add('active');
       }
     });
@@ -94,8 +101,8 @@ class OnboardingPage {
     this.progressRing.style.strokeDashoffset = `${offset}`;
 
     // Log pose for debugging
-    if (status.pose) {
-      console.log(`Step ${status.currentStep}: yaw=${status.pose.yaw.toFixed(1)}° pitch=${status.pose.pitch.toFixed(1)}° roll=${status.pose.roll.toFixed(1)}°`);
+    if (status.detectedPose) {
+      console.log(`Step ${status.currentStepIndex}: yaw=${status.detectedPose.yaw.toFixed(1)}° pitch=${status.detectedPose.pitch.toFixed(1)}° roll=${status.detectedPose.roll.toFixed(1)}°, matched=${status.poseMatched}`);
     }
   }
 

@@ -24,14 +24,22 @@ export async function initializeFaceDetection(): Promise<void> {
 
   isInitializing = true;
   try {
-    const vision = await FilesetResolver.forVisionTasks(
-      // Use locally bundled WASM files for offline operation and extension compatibility
-      '/mediapipe/wasm'
-    );
+    // Detect if we're in an extension context
+    const isExtension = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL;
+    
+    const wasmPath = isExtension 
+      ? chrome.runtime.getURL('mediapipe/wasm')
+      : '/mediapipe/wasm';
+    
+    const modelPath = isExtension
+      ? chrome.runtime.getURL('mediapipe/models/face_landmarker.task')
+      : '/mediapipe/models/face_landmarker.task';
+    
+    const vision = await FilesetResolver.forVisionTasks(wasmPath);
     
     faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
       baseOptions: {
-        modelAssetPath: '/mediapipe/models/face_landmarker.task',
+        modelAssetPath: modelPath,
         delegate: 'GPU'
       },
       outputFaceBlendshapes: true,

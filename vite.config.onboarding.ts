@@ -2,13 +2,13 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
 export default defineConfig({
+  base: './',
   build: {
     outDir: 'extension/onboarding',
     emptyOutDir: true,
+    copyPublicDir: false,
     rollupOptions: {
-      input: {
-        onboarding: resolve(__dirname, 'extension-src/onboarding/onboarding.html')
-      },
+      input: resolve(__dirname, 'extension-src/onboarding/onboarding.html'),
       output: {
         entryFileNames: '[name].js',
         chunkFileNames: '[name].js',

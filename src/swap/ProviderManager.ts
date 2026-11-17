@@ -4,7 +4,7 @@
  */
 
 import type { FaceSwapProvider, SwapProviderConfig } from '../types';
-import { MockProvider } from './providers/MockProvider';
+import { LocalProvider } from './providers/MockProvider'; // Renamed from MockProvider
 import { ReplicateProvider } from './providers/ReplicateProvider';
 import { FalProvider } from './providers/FalProvider';
 
@@ -14,12 +14,12 @@ export class ProviderManager {
 
   constructor() {
     // Initialize all providers
-    this.providers.set('mock', new MockProvider());
+    this.providers.set('local', new LocalProvider());
     this.providers.set('replicate', new ReplicateProvider());
     this.providers.set('fal', new FalProvider());
     
-    // Default to mock
-    this.currentProvider = this.providers.get('mock')!;
+    // Default to local (free)
+    this.currentProvider = this.providers.get('local')!;
   }
 
   /**

@@ -1,0 +1,87 @@
+/**
+ * StarringYou - Content Script Styles
+ */
+
+/* Image wrapper */
+.starringyou-wrapper {
+  position: relative !important;
+  display: inline-block !important;
+}
+
+/* Star me button (hover) */
+.starringyou-star-btn {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  background: rgba(99, 102, 241, 0.95) !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 8px 12px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  opacity: 0 !important;
+  transition: opacity 0.2s, transform 0.2s !important;
+  z-index: 10000 !important;
+  font-family: system-ui, -apple-system, sans-serif !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+}
+
+.starringyou-wrapper:hover .starringyou-star-btn {
+  opacity: 1 !important;
+}
+
+.starringyou-star-btn:hover {
+  transform: scale(1.05) !important;
+  background: rgba(79, 70, 229, 0.95) !important;
+}
+
+/* Toggle badge (shows after swap) */
+.starringyou-toggle-badge {
+  position: absolute !important;
+  bottom: 10px !important;
+  right: 10px !important;
+  background: #10b981 !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 50% !important;
+  width: 36px !important;
+  height: 36px !important;
+  font-size: 18px !important;
+  cursor: pointer !important;
+  z-index: 10000 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+  transition: transform 0.2s, background 0.2s !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.starringyou-toggle-badge:hover {
+  transform: scale(1.1) rotate(180deg) !important;
+}
+
+/* Loading indicator */
+.starringyou-loader {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  background: rgba(0, 0, 0, 0.8) !important;
+  color: white !important;
+  padding: 12px 20px !important;
+  border-radius: 8px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  z-index: 10001 !important;
+  pointer-events: none !important;
+  font-family: system-ui, -apple-system, sans-serif !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+  animation: starringyou-pulse 1.5s infinite !important;
+}
+
+@keyframes starringyou-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StarringYou</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="popup-header">
+      <h1>⭐ StarringYou</h1>
+    </header>
+
+    <div class="status-section">
+      <div id="enrollment-status" class="status-item">
+        <span class="status-label">Enrollment:</span>
+        <span id="enrollment-text" class="status-value">Not enrolled</span>
+      </div>
+      
+      <div class="status-item">
+        <span class="status-label">Face Swap:</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="enabled-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+        <span id="enabled-text" class="status-value">OFF</span>
+      </div>
+    </div>
+
+    <div class="actions-section">
+      <button id="enroll-btn" class="btn btn-primary">
+        <span id="enroll-btn-text">Enroll Face</span>
+      </button>
+      
+      <button id="delete-btn" class="btn btn-danger" disabled>
+        Delete My Face Data
+      </button>
+    </div>
+
+    <div class="provider-section">
+      <label>Swap Provider:</label>
+      <select id="provider-select" class="provider-select">
+        <option value="local">Local (Free)</option>
+        <option value="replicate">Replicate (~$0.01/swap)</option>
+        <option value="fal">fal.ai (~$0.005/swap)</option>
+      </select>
+      <p class="help-text">Local provider is free and runs in your browser</p>
+    </div>
+
+    <footer class="popup-footer">
+      <p class="privacy-note">🔒 Your face data stays on your device</p>
+    </footer>
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

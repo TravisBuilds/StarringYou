@@ -1,0 +1,29 @@
+StarringYou - Image Credits
+============================
+
+Sample Images
+-------------
+The sample images in public/sample-images/ are placeholders.
+Replace them with properly licensed images from:
+
+- Unsplash (https://unsplash.com) - Unsplash License
+- Pexels (https://www.pexels.com) - Pexels License
+
+Format for attribution:
+model-1.jpg - Photo by [Photographer Name] on [Platform]
+URL: [original photo URL]
+
+
+Third-Party Libraries
+---------------------
+- MediaPipe Face Landmarker - Apache License 2.0
+  https://github.com/google/mediapipe
+
+- JSZip - MIT License
+  https://github.com/Stuk/jszip
+
+- Vite - MIT License
+  https://vitejs.dev
+
+- TypeScript - Apache License 2.0
+  https://www.typescriptlang.org

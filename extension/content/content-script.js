@@ -465,11 +465,11 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
       maskCtx.drawImage(maskCanvas, 0, 0);
       maskCtx.filter = 'none';
       
-      // Color transfer: match source to target skin tone
+      // Color transfer: RGB-based mean/std matching (more robust than LAB)
       const srcInnerFace = INNER_FACE_INDICES.map(i => srcLandmarks[i]);
       const tgtInnerFace = INNER_FACE_INDICES.map(i => tgtLandmarks[i]);
       
-      // Get source face pixels in LAB
+      // Get source and target ImageData
       const srcFaceCanvas = document.createElement('canvas');
       srcFaceCanvas.width = srcCropCanvas.width;
       srcFaceCanvas.height = srcCropCanvas.height;
@@ -477,51 +477,65 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
       srcFaceCtx.drawImage(srcCropCanvas, 0, 0);
       const srcData = srcFaceCtx.getImageData(0, 0, srcFaceCanvas.width, srcFaceCanvas.height);
       
+      const tgtData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      
       // Sample colors from inner face regions
-      const sampleColor = (imageData, landmarks, imgW, imgH, cropX, cropY, scale) => {
-        const colors = { L: [], A: [], B: [] };
+      const sampleColors = (imageData, landmarks, imgW, imgH, offsetX, offsetY, sampleScale) => {
+        const colors = { r: [], g: [], b: [] };
         landmarks.forEach(p => {
-          const x = Math.round((p.x - cropX) * scale);
-          const y = Math.round((p.y - cropY) * scale);
+          const x = Math.round((p.x - offsetX) * sampleScale);
+          const y = Math.round((p.y - offsetY) * sampleScale);
           if (x >= 0 && x < imgW && y >= 0 && y < imgH) {
             const idx = (y * imgW + x) * 4;
-            const lab = rgbToLab(imageData.data[idx], imageData.data[idx + 1], imageData.data[idx + 2]);
-            colors.L.push(lab[0]);
-            colors.A.push(lab[1]);
-            colors.B.push(lab[2]);
+            colors.r.push(imageData.data[idx]);
+            colors.g.push(imageData.data[idx + 1]);
+            colors.b.push(imageData.data[idx + 2]);
           }
         });
         return colors;
       };
       
-      const srcColors = sampleColor(srcData, srcInnerFace, srcFaceCanvas.width, srcFaceCanvas.height, 
-        srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1, 1.2 / (srcMaxX - srcMinX));
+      const srcSampleScale = srcFaceCanvas.width / (srcWidth * 1.2);
+      const srcColors = sampleColors(srcData, srcInnerFace, srcFaceCanvas.width, srcFaceCanvas.height, 
+        srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1, srcSampleScale);
       
-      // Get target color stats
-      const tgtData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const tgtColors = sampleColor(tgtData, tgtInnerFace, canvas.width, canvas.height, 0, 0, 1);
+      const tgtColors = sampleColors(tgtData, tgtInnerFace, canvas.width, canvas.height, 0, 0, 1);
       
-      // Compute mean and std
-      const mean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
-      const std = (arr, m) => Math.sqrt(arr.reduce((a, b) => a + (b - m) ** 2, 0) / arr.length);
-      
-      const srcMean = { L: mean(srcColors.L), A: mean(srcColors.A), B: mean(srcColors.B) };
-      const srcStd = { L: std(srcColors.L, srcMean.L), A: std(srcColors.A, srcMean.A), B: std(srcColors.B, srcMean.B) };
-      const tgtMean = { L: mean(tgtColors.L), A: mean(tgtColors.A), B: mean(tgtColors.B) };
-      const tgtStd = { L: std(tgtColors.L, tgtMean.L), A: std(tgtColors.A, tgtMean.A), B: std(tgtColors.B, tgtMean.B) };
-      
-      // Apply color transfer to source
-      for (let i = 0; i < srcData.data.length; i += 4) {
-        const lab = rgbToLab(srcData.data[i], srcData.data[i + 1], srcData.data[i + 2]);
-        lab[0] = ((lab[0] - srcMean.L) / (srcStd.L + 1e-6)) * tgtStd.L + tgtMean.L;
-        lab[1] = ((lab[1] - srcMean.A) / (srcStd.A + 1e-6)) * tgtStd.A + tgtMean.A;
-        lab[2] = ((lab[2] - srcMean.B) / (srcStd.B + 1e-6)) * tgtStd.B + tgtMean.B;
-        const rgb = labToRgb(lab[0], lab[1], lab[2]);
-        srcData.data[i] = rgb[0];
-        srcData.data[i + 1] = rgb[1];
-        srcData.data[i + 2] = rgb[2];
+      // Skip color transfer if insufficient samples
+      if (srcColors.r.length > 5 && tgtColors.r.length > 5) {
+        // Compute mean and std per channel
+        const mean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+        const std = (arr, m) => Math.sqrt(arr.reduce((a, b) => a + (b - m) ** 2, 0) / arr.length);
+        
+        const srcMean = { r: mean(srcColors.r), g: mean(srcColors.g), b: mean(srcColors.b) };
+        const srcStd = { r: std(srcColors.r, srcMean.r), g: std(srcColors.g, srcMean.g), b: std(srcColors.b, srcMean.b) };
+        const tgtMean = { r: mean(tgtColors.r), g: mean(tgtColors.g), b: mean(tgtColors.b) };
+        const tgtStd = { r: std(tgtColors.r, tgtMean.r), g: std(tgtColors.g, tgtMean.g), b: std(tgtColors.b, tgtMean.b) };
+        
+        // Apply color transfer with strength factor
+        const strength = 0.7;
+        for (let i = 0; i < srcData.data.length; i += 4) {
+          const r = srcData.data[i];
+          const g = srcData.data[i + 1];
+          const b = srcData.data[i + 2];
+          
+          // Transfer per channel
+          let r2 = ((r - srcMean.r) / (srcStd.r + 1e-6)) * tgtStd.r + tgtMean.r;
+          let g2 = ((g - srcMean.g) / (srcStd.g + 1e-6)) * tgtStd.g + tgtMean.g;
+          let b2 = ((b - srcMean.b) / (srcStd.b + 1e-6)) * tgtStd.b + tgtMean.b;
+          
+          // Blend with original
+          r2 = r + (r2 - r) * strength;
+          g2 = g + (g2 - g) * strength;
+          b2 = b + (b2 - b) * strength;
+          
+          // Clamp
+          srcData.data[i] = Math.max(0, Math.min(255, Math.round(r2)));
+          srcData.data[i + 1] = Math.max(0, Math.min(255, Math.round(g2)));
+          srcData.data[i + 2] = Math.max(0, Math.min(255, Math.round(b2)));
+        }
+        srcFaceCtx.putImageData(srcData, 0, 0);
       }
-      srcFaceCtx.putImageData(srcData, 0, 0);
       
       // Draw transformed source face with color correction
       ctx.save();

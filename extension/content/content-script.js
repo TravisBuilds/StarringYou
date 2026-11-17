@@ -7,7 +7,7 @@ console.log('⭐ StarringYou content script loaded');
 
 // E2E Testing: Hardcoded test face (will be overridden by real enrollment)
 const TEST_MODE = window.location.search.includes('test=true');
-const HARDCODED_TEST_FACE = '/sample-images/model-2.jpg';
+const HARDCODED_TEST_FACE = 'http://localhost:8765/public/sample-images/model-2.jpg';
 
 console.log('⭐ TEST_MODE:', TEST_MODE);
 

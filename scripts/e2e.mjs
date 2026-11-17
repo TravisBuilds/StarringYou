@@ -49,7 +49,8 @@ async function runE2E() {
   logToFile(`📂 Extension path: ${extensionDir}`);
   
   const context = await chromium.launchPersistentContext('', {
-    headless: true,
+    headless: false,
+    channel: 'chromium',
     args: [
       `--disable-extensions-except=${extensionDir}`,
       `--load-extension=${extensionDir}`,
@@ -61,11 +62,21 @@ async function runE2E() {
   });
 
   try {
-    // Wait for extension to load
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Wait for service worker to load
+    logToFile('⏳ Waiting for service worker...');
+    
+    const swPromise = context.waitForEvent('serviceworker', { timeout: 10000 }).catch(() => null);
+    const sw = await swPromise;
+    
+    if (sw) {
+      logToFile(`✅ Service worker loaded: ${sw.url()}`);
+      sw.on('console', msg => logToFile(`[SW] ${msg.text()}`));
+    } else {
+      logToFile('⚠️ Service worker did not load within 10s');
+    }
     
     const backgroundPages = context.serviceWorkers();
-    logToFile(`📦 Service workers: ${backgroundPages.length}`);
+    logToFile(`📦 Service workers count: ${backgroundPages.length}`);
     
     if (backgroundPages.length > 0) {
       const sw = backgroundPages[0];
@@ -78,6 +89,18 @@ async function runE2E() {
       logToFile('⚠️ Continuing anyway with test mode...');
     }
 
+    // Screenshot chrome://extensions to check for errors
+    logToFile('📸 Checking chrome://extensions for errors...');
+    const extensionsPage = await context.newPage();
+    await extensionsPage.goto('chrome://extensions/');
+    await extensionsPage.waitForTimeout(1000);
+    await extensionsPage.screenshot({ 
+      path: '/cursor/stores/self/e2e-extensions-page.png',
+      fullPage: true 
+    });
+    await extensionsPage.close();
+    logToFile('✅ Extensions page screenshot saved');
+    
     logToFile('🧪 Using TEST MODE - content script will use hardcoded test face');
     
     // Create page and navigate to test fixture with test mode enabled

@@ -25,13 +25,13 @@ export async function initializeFaceDetection(): Promise<void> {
   isInitializing = true;
   try {
     const vision = await FilesetResolver.forVisionTasks(
-      // Use bundled WASM files for extension compatibility
-      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.17/wasm'
+      // Use locally bundled WASM files for offline operation and extension compatibility
+      '/mediapipe/wasm'
     );
     
     faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
       baseOptions: {
-        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+        modelAssetPath: '/mediapipe/models/face_landmarker.task',
         delegate: 'GPU'
       },
       outputFaceBlendshapes: true,

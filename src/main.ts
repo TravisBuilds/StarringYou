@@ -7,13 +7,14 @@ import { EnrollmentEngine } from './enrollment/EnrollmentEngine';
 import type { EnrollmentData } from './types';
 import { saveEnrollment, loadEnrollment, deleteEnrollment, createEnrollmentZip, downloadBlob } from './utils/storage';
 import { ProviderManager } from './swap/ProviderManager';
+import { isTestModeEnabled, showTestModeIndicator } from './utils/testMode';
 
-// Sample images (SVG placeholders - replace with real JPG images from Unsplash/Pexels)
+// Sample images (real clothing model photos from Unsplash - see CREDITS.txt)
 const SAMPLE_IMAGES = [
-  { id: 'model-1', path: '/sample-images/model-1.svg', caption: 'Casual Jacket' },
-  { id: 'model-2', path: '/sample-images/model-2.svg', caption: 'Business Suit' },
-  { id: 'model-3', path: '/sample-images/model-3.svg', caption: 'Summer Dress' },
-  { id: 'model-4', path: '/sample-images/model-4.svg', caption: 'Winter Coat' }
+  { id: 'model-1', path: '/sample-images/model-1.jpg', caption: 'Casual Style' },
+  { id: 'model-2', path: '/sample-images/model-2.jpg', caption: 'Business Look' },
+  { id: 'model-3', path: '/sample-images/model-3.jpg', caption: 'Portrait Style' },
+  { id: 'model-4', path: '/sample-images/model-4.jpg', caption: 'Fashion Forward' }
 ];
 
 class App {
@@ -71,7 +72,7 @@ class App {
     document.getElementById(`nav-${viewId}`)?.classList.add('active');
   }
 
-  private setupEnrollmentView(): void {
+  private async setupEnrollmentView(): Promise<void> {
     const video = document.getElementById('enrollment-video') as HTMLVideoElement;
     const canvas = document.getElementById('enrollment-canvas') as HTMLCanvasElement;
     const startBtn = document.getElementById('start-enrollment') as HTMLButtonElement;
@@ -80,13 +81,21 @@ class App {
 
     this.enrollmentEngine = new EnrollmentEngine();
 
-    // Initialize engine
-    this.enrollmentEngine.initialize(video, canvas).then(() => {
+    // Check for test mode
+    if (isTestModeEnabled()) {
+      showTestModeIndicator();
+      instructionText.textContent = 'Test mode: initializing with sample image...';
+    }
+
+    // Initialize engine (will use test stream if in test mode)
+    try {
+      await this.enrollmentEngine.initialize(video, canvas);
       startBtn.style.display = 'inline-block';
-      instructionText.textContent = 'Ready to begin! Click Start to enroll your face.';
-    }).catch(error => {
+      const modeText = isTestModeEnabled() ? ' (Test Mode)' : '';
+      instructionText.textContent = `Ready to begin! Click Start to enroll your face.${modeText}`;
+    } catch (error: any) {
       instructionText.textContent = `Error: ${error.message}. Please allow camera access.`;
-    });
+    }
 
     // Status updates
     this.enrollmentEngine.onStatusUpdate(status => {

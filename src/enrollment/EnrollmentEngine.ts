@@ -13,6 +13,7 @@ import {
 } from '../utils/faceDetection';
 import { evaluateFrameQuality, meetsQualityThreshold } from '../utils/qualityScoring';
 import { ENROLLMENT_STEPS, HOLD_DURATION_MS, CAPTURE_INTERVAL_MS, MAX_FRAMES_PER_STEP } from './steps';
+import { getTestStream } from '../utils/testMode';
 
 export type EnrollmentState = 'idle' | 'initializing' | 'ready' | 'running' | 'completed' | 'error';
 
@@ -61,14 +62,21 @@ export class EnrollmentEngine {
       // Initialize MediaPipe
       await initializeFaceDetection();
       
-      // Request camera access
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: 'user'
-        }
-      });
+      // Try test stream first (for development/testing)
+      const testStream = await getTestStream();
+      
+      if (testStream) {
+        this.stream = testStream;
+      } else {
+        // Request camera access
+        this.stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user'
+          }
+        });
+      }
       
       this.videoElement.srcObject = this.stream;
       await this.videoElement.play();

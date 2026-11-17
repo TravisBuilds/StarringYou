@@ -75,6 +75,28 @@ npm run build
 npm preview
 ```
 
+### Test Mode (No Webcam Required)
+
+For development and testing without a webcam, use test mode with a static image:
+
+```bash
+# Start dev server
+npm run dev
+
+# Open with test mode enabled
+# Uses model-2.jpg by default
+http://localhost:43123/?testMode=true
+
+# Use a custom test image
+http://localhost:43123/?testMode=true&testImage=/sample-images/model-1.jpg
+```
+
+Test mode creates a fake video stream from a still image, allowing you to:
+- Test face detection and landmark extraction
+- Verify MediaPipe integration works
+- Demo the UI without camera access
+- Sanity-check enrollment flow logic
+
 ---
 
 ## 📖 How to Use

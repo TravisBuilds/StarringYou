@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StarringYou - Face Enrollment</title>
+    <meta name="description" content="See yourself starring in any outfit - enroll your face to swap into clothing model images" />
+    <script type="module" crossorigin src="/StarringYou/assets/index-BRxEgbeA.js"></script>
+    <link rel="modulepreload" crossorigin href="/StarringYou/assets/rolldown-runtime-pP25SEvz.js">
+    <link rel="modulepreload" crossorigin href="/StarringYou/assets/mediapipe-BkET_18R.js">
+    <link rel="stylesheet" crossorigin href="/StarringYou/assets/index-DokN04cL.css">
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <h1>⭐ StarringYou</h1>
+        <p class="tagline">See yourself starring in any outfit</p>
+      </header>
+
+      <div class="info-banner">
+        <div class="info-section">
+          <strong>🎥 Try enrollment + test swaps here</strong> - Use your webcam to enroll your face, then see yourself swapped into sample outfits.
+        </div>
+        <div class="info-section">
+          <strong>🔌 Install the extension:</strong>
+          1. Download <a href="/StarringYou/starringyou-extension.zip" download>starringyou-extension.zip</a>
+          2. Unzip the file
+          3. Visit <code>chrome://extensions</code>, enable Developer mode
+          4. Click "Load unpacked" and select the unzipped folder
+        </div>
+      </div>
+
+      <nav class="app-nav">
+        <button id="nav-enroll" class="nav-btn active">Enroll Face</button>
+        <button id="nav-swap" class="nav-btn" disabled>Try Swap</button>
+        <button id="nav-settings" class="nav-btn">Settings</button>
+      </nav>
+
+      <!-- Enrollment View -->
+      <div id="view-enroll" class="view active">
+        <div class="enrollment-container">
+          <div class="camera-section">
+            <div class="camera-wrapper">
+              <video id="enrollment-video" autoplay playsinline></video>
+              <canvas id="enrollment-canvas" style="display: none;"></canvas>
+              <div id="face-guide" class="face-guide">
+                <svg viewBox="0 0 200 200">
+                  <circle cx="100" cy="100" r="80" class="guide-ring" />
+                  <path id="progress-arc" class="progress-arc" d="" />
+                </svg>
+              </div>
+            </div>
+            <div class="instruction-panel">
+              <p id="instruction-text" class="instruction-text">Initializing camera...</p>
+              <div id="step-indicators" class="step-indicators"></div>
+            </div>
+          </div>
+          
+          <div class="controls">
+            <button id="start-enrollment" class="btn btn-primary" style="display: none;">
+              Start Enrollment
+            </button>
+            <button id="restart-enrollment" class="btn btn-secondary" style="display: none;">
+              Restart
+            </button>
+          </div>
+        </div>
+
+        <!-- Review Screen (hidden initially) -->
+        <div id="review-screen" class="review-screen" style="display: none;">
+          <h2>Review Your Captures</h2>
+          <div id="review-frames" class="review-frames"></div>
+          <div class="review-actions">
+            <button id="download-zip" class="btn btn-primary">Download as ZIP</button>
+            <button id="retake" class="btn btn-secondary">Retake</button>
+            <button id="proceed-to-swap" class="btn btn-primary">Try Face Swap →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Swap View -->
+      <div id="view-swap" class="view">
+        <div class="swap-container">
+          <h2>Try a Face Swap</h2>
+          <p class="swap-description">
+            Select a sample clothing model image and see your enrolled face swapped onto it.
+          </p>
+          
+          <div class="sample-images">
+            <h3>Select a Model Image:</h3>
+            <div id="sample-image-grid" class="sample-grid"></div>
+          </div>
+
+          <div id="swap-result" class="swap-result" style="display: none;">
+            <div class="result-images">
+              <div class="result-image">
+                <h4>Your Enrolled Face</h4>
+                <img id="enrolled-face-img" alt="Your face" />
+              </div>
+              <div class="result-image">
+                <h4>Model Image</h4>
+                <img id="target-model-img" alt="Model" />
+              </div>
+              <div class="result-image">
+                <h4>Swapped Result</h4>
+                <img id="swapped-result-img" alt="Face swap result" />
+                <p id="swap-provider-info" class="provider-info"></p>
+              </div>
+            </div>
+            <button id="try-another" class="btn btn-secondary">Try Another Image</button>
+          </div>
+
+          <div id="swap-loading" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>Swapping faces...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings View -->
+      <div id="view-settings" class="view">
+        <div class="settings-container">
+          <h2>Settings</h2>
+          
+          <section class="settings-section">
+            <h3>Face Swap Provider</h3>
+            <p class="help-text">
+              Choose how to perform face swaps. Mock provider runs locally (demo only). 
+              Real providers require API keys and charge per swap.
+            </p>
+            
+            <div class="provider-selector">
+              <label>
+                <input type="radio" name="provider" value="mock" checked />
+                <div class="provider-option">
+                  <strong>Mock (Local Demo)</strong>
+                  <span class="provider-cost">Free - crude overlay for testing</span>
+                </div>
+              </label>
+              
+              <label>
+                <input type="radio" name="provider" value="replicate" />
+                <div class="provider-option">
+                  <strong>Replicate</strong>
+                  <span class="provider-cost" id="replicate-cost">~$0.005-0.02 per swap</span>
+                </div>
+              </label>
+              
+              <label>
+                <input type="radio" name="provider" value="fal" />
+                <div class="provider-option">
+                  <strong>fal.ai</strong>
+                  <span class="provider-cost" id="fal-cost">~$0.003-0.01 per swap</span>
+                </div>
+              </label>
+            </div>
+
+            <div id="api-key-section" class="api-key-section" style="display: none;">
+              <label for="api-key-input">API Key (not saved):</label>
+              <input 
+                type="password" 
+                id="api-key-input" 
+                placeholder="Paste your API key here..."
+                autocomplete="off"
+              />
+              <p class="help-text">
+                API keys are stored only in memory and never committed or uploaded.
+              </p>
+            </div>
+          </section>
+
+          <section class="settings-section privacy-section">
+            <h3>Privacy & Data</h3>
+            <p class="help-text">
+              Your face data is stored locally in your browser only. No data is uploaded.
+            </p>
+            <button id="delete-data" class="btn btn-danger">Delete My Face Data</button>
+          </section>
+        </div>
+      </div>
+
+      <footer class="app-footer">
+        <p>
+          <strong>Privacy First:</strong> Your face data stays in your browser. 
+          No uploads, no tracking, no third-party analytics.
+        </p>
+      </footer>
+    </div>
+
+  </body>
+</html>

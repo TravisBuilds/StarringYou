@@ -371,26 +371,12 @@ const INNER_FACE_INDICES = [
 async function performSimpleSwap(sourceFrame, targetImageDataUrl) {
   return new Promise(async (resolve, reject) => {
     try {
-      // Detect faces - use stored landmarks for source if available
+      // Detect faces in both source and target (always detect to match image dimensions)
       console.log('StarringYou: Detecting faces...');
-      
-      let sourceFaceData;
-      if (sourceFrame.landmarks && sourceFrame.width && sourceFrame.height) {
-        // Use stored landmarks from enrollment
-        // sourceFrame.landmarks is a FaceLandmarks object with {landmarks: Array, blendshapes?: Array}
-        sourceFaceData = {
-          success: true,
-          landmarks: sourceFrame.landmarks.landmarks || sourceFrame.landmarks,
-          width: sourceFrame.width,
-          height: sourceFrame.height
-        };
-        console.log('StarringYou: Using stored landmarks from enrollment');
-      } else {
-        // Detect landmarks from image
-        sourceFaceData = await detectFaceInImage(sourceFrame.dataUrl);
-      }
-      
-      const targetFaceData = await detectFaceInImage(targetImageDataUrl);
+      const [sourceFaceData, targetFaceData] = await Promise.all([
+        detectFaceInImage(sourceFrame.dataUrl),
+        detectFaceInImage(targetImageDataUrl)
+      ]);
       
       if (!targetFaceData.success) {
         console.log('StarringYou: No face in target, skipping');
@@ -424,12 +410,9 @@ async function performSimpleSwap(sourceFrame, targetImageDataUrl) {
       ctx.drawImage(targetImg, 0, 0, canvas.width, canvas.height);
       
       // Get landmarks in pixel coordinates
-      // If frame has stored dimensions, use those; otherwise use image natural dimensions
-      const srcFrameWidth = sourceFaceData.width || sourceImg.naturalWidth;
-      const srcFrameHeight = sourceFaceData.height || sourceImg.naturalHeight;
       const srcLandmarks = sourceFaceData.landmarks.map(p => ({
-        x: p.x * srcFrameWidth,
-        y: p.y * srcFrameHeight
+        x: p.x * sourceImg.naturalWidth,
+        y: p.y * sourceImg.naturalHeight
       }));
       
       const tgtLandmarks = targetFaceData.landmarks.map(p => ({

@@ -149,9 +149,13 @@ async function runE2E() {
       // Wait for remaining steps to complete (~4 more steps * 0.5s = 2s, plus buffer)
       await onboardingPage.waitForTimeout(4000);
       
+      // Wait a bit more for UI to update after completion
+      await onboardingPage.waitForTimeout(500);
+      
       // Take final screenshot
       await onboardingPage.screenshot({
-        path: '/cursor/stores/self/onboarding-complete.png'
+        path: '/cursor/stores/self/onboarding-complete.png',
+        fullPage: true
       });
       logToFile('📸 Onboarding complete screenshot saved');
       

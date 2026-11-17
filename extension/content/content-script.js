@@ -182,6 +182,7 @@ function createToggleBadge(img, originalSrc) {
 
 // Perform face swap on image
 async function swapImageFace(img) {
+  const startTime = performance.now();
   const originalSrc = img.src;
   
   // Check cache first
@@ -189,10 +190,12 @@ async function swapImageFace(img) {
   if (swapCache.has(cacheKey)) {
     console.log(`StarringYou: CACHE HIT for ${img.src}`);
     applySwappedImage(img, swapCache.get(cacheKey));
+    img.setAttribute('data-starringyou-state', 'done');
     return;
   }
   
   console.log(`StarringYou: CACHE MISS for ${img.src}`);
+  img.setAttribute('data-starringyou-state', 'processing');
 
   // Show loading indicator
   const wrapper = img.parentElement;
@@ -265,8 +268,13 @@ async function swapImageFace(img) {
     // Apply swapped image
     applySwappedImage(img, swappedDataUrl);
     
+    const duration = Math.round(performance.now() - startTime);
+    console.log(`StarringYou: Swap completed in ${duration}ms for ${originalSrc}`);
+    img.setAttribute('data-starringyou-state', 'done');
+    
   } catch (error) {
     console.error('StarringYou: Swap failed:', error);
+    img.setAttribute('data-starringyou-state', 'error');
   } finally {
     loader.remove();
   }
@@ -521,7 +529,7 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
       const tgtAngle = Math.atan2(tgtRightEye.y - tgtLeftEye.y, tgtRightEye.x - tgtLeftEye.x);
       const rotation = tgtAngle - srcAngle;
       
-      // Crop source face region
+      // Crop source face region with generous padding (40% each side)
       const srcFaceOval = FACE_OVAL_INDICES.map(i => srcLandmarks[i]);
       const srcMinX = Math.min(...srcFaceOval.map(p => p.x));
       const srcMaxX = Math.max(...srcFaceOval.map(p => p.x));
@@ -530,16 +538,19 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
       const srcWidth = srcMaxX - srcMinX;
       const srcHeight = srcMaxY - srcMinY;
       
+      // Generous padding clamped to image bounds
+      const padding = 0.4;
+      const cropX = Math.max(0, srcMinX - srcWidth * padding);
+      const cropY = Math.max(0, srcMinY - srcHeight * padding);
+      const cropW = Math.min(sourceImg.naturalWidth - cropX, srcWidth * (1 + 2 * padding));
+      const cropH = Math.min(sourceImg.naturalHeight - cropY, srcHeight * (1 + 2 * padding));
+      
       // Create source face crop canvas
       const srcCropCanvas = document.createElement('canvas');
-      srcCropCanvas.width = srcWidth * 1.2;
-      srcCropCanvas.height = srcHeight * 1.2;
+      srcCropCanvas.width = cropW;
+      srcCropCanvas.height = cropH;
       const srcCropCtx = srcCropCanvas.getContext('2d');
-      srcCropCtx.drawImage(sourceImg, 
-        srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1, 
-        srcWidth * 1.2, srcHeight * 1.2,
-        0, 0, srcCropCanvas.width, srcCropCanvas.height
-      );
+      srcCropCtx.drawImage(sourceImg, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
       
       // Create mask from target face oval, shrunk and feathered
       let tgtFaceOval = FACE_OVAL_INDICES.map(i => tgtLandmarks[i]);
@@ -619,9 +630,9 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
         return colors;
       };
       
-      const srcSampleScale = srcFaceCanvas.width / (srcWidth * 1.2);
+      const srcSampleScale = srcFaceCanvas.width / cropW;
       const srcColors = sampleColors(srcData, srcInnerFace, srcFaceCanvas.width, srcFaceCanvas.height, 
-        srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1, srcSampleScale);
+        cropX, cropY, srcSampleScale);
       
       const tgtColors = sampleColors(tgtData, tgtInnerFace, canvas.width, canvas.height, 0, 0, 1);
       
@@ -671,16 +682,19 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
       warpedCtx.rotate(rotation);
       warpedCtx.scale(scale, scale);
       warpedCtx.translate(-srcFaceCenter.x, -srcFaceCenter.y);
-      warpedCtx.drawImage(srcFaceCanvas, srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1);
+      warpedCtx.drawImage(srcFaceCanvas, cropX, cropY);
       warpedCtx.restore();
       
-      // Manual alpha compositing: result = target*(1-a) + source*a
+      // Manual alpha compositing: multiply mask by source alpha, then blend
       const warpedData = warpedCtx.getImageData(0, 0, canvas.width, canvas.height);
       const targetData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const resultData = ctx.createImageData(canvas.width, canvas.height);
       
       for (let i = 0; i < maskData.data.length; i += 4) {
-        const alpha = maskData.data[i + 3] / 255; // Mask alpha
+        // Combine mask alpha with warped source alpha
+        const maskAlpha = maskData.data[i + 3] / 255;
+        const srcAlpha = warpedData.data[i + 3] / 255;
+        const alpha = maskAlpha * srcAlpha;
         
         // Blend RGB channels
         resultData.data[i] = targetData.data[i] * (1 - alpha) + warpedData.data[i] * alpha;

@@ -226,8 +226,17 @@ async function runE2E() {
       fullPage: true 
     });
     
-    // Wait for content script to process images
-    await page.waitForTimeout(5000);
+    // Wait for all images to finish processing (up to 20s)
+    logToFile('⏳ Waiting for image swaps to complete...');
+    await page.waitForFunction(() => {
+      const images = Array.from(document.querySelectorAll('.product-image'));
+      return images.every(img => {
+        const state = img.getAttribute('data-starringyou-state');
+        return state === 'done' || state === 'error' || state === null;
+      });
+    }, { timeout: 20000 }).catch(() => {
+      logToFile('⚠️  Timeout waiting for swaps, continuing anyway');
+    });
     
     // Take after screenshot
     logToFile('📸 Taking after screenshot...');

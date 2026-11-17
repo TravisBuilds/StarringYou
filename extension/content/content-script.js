@@ -243,6 +243,55 @@ async function fetchImageViaBackground(url) {
   });
 }
 
+// RGB to LAB color space conversion
+function rgbToLab(r, g, b) {
+  // RGB to XYZ
+  r = r / 255; g = g / 255; b = b / 255;
+  r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
+  g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
+  b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
+  
+  let x = r * 0.4124 + g * 0.3576 + b * 0.1805;
+  let y = r * 0.2126 + g * 0.7152 + b * 0.0722;
+  let z = r * 0.0193 + g * 0.1192 + b * 0.9505;
+  
+  // XYZ to LAB
+  x = x / 0.95047; y = y / 1.00000; z = z / 1.08883;
+  x = x > 0.008856 ? Math.pow(x, 1/3) : (7.787 * x + 16/116);
+  y = y > 0.008856 ? Math.pow(y, 1/3) : (7.787 * y + 16/116);
+  z = z > 0.008856 ? Math.pow(z, 1/3) : (7.787 * z + 16/116);
+  
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+}
+
+function labToRgb(l, a, b) {
+  // LAB to XYZ
+  let y = (l + 16) / 116;
+  let x = a / 500 + y;
+  let z = y - b / 200;
+  
+  x = Math.pow(x, 3) > 0.008856 ? Math.pow(x, 3) : (x - 16/116) / 7.787;
+  y = Math.pow(y, 3) > 0.008856 ? Math.pow(y, 3) : (y - 16/116) / 7.787;
+  z = Math.pow(z, 3) > 0.008856 ? Math.pow(z, 3) : (z - 16/116) / 7.787;
+  
+  x *= 0.95047; y *= 1.00000; z *= 1.08883;
+  
+  // XYZ to RGB
+  let r = x *  3.2406 + y * -1.5372 + z * -0.4986;
+  let g = x * -0.9689 + y *  1.8758 + z *  0.0415;
+  let b_ = x *  0.0557 + y * -0.2040 + z *  1.0570;
+  
+  r = r > 0.0031308 ? 1.055 * Math.pow(r, 1/2.4) - 0.055 : 12.92 * r;
+  g = g > 0.0031308 ? 1.055 * Math.pow(g, 1/2.4) - 0.055 : 12.92 * g;
+  b_ = b_ > 0.0031308 ? 1.055 * Math.pow(b_, 1/2.4) - 0.055 : 12.92 * b_;
+  
+  return [
+    Math.max(0, Math.min(255, Math.round(r * 255))),
+    Math.max(0, Math.min(255, Math.round(g * 255))),
+    Math.max(0, Math.min(255, Math.round(b_ * 255)))
+  ];
+}
+
 // Detect face in target image via background/offscreen
 async function detectFaceInImage(imageUrl) {
   return new Promise((resolve, reject) => {
@@ -264,6 +313,16 @@ const FACE_OVAL_INDICES = [
   10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
   397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
   172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
+];
+
+// Inner face region for color transfer (cheeks, forehead - excluding eyes, mouth)
+const INNER_FACE_INDICES = [
+  // Forehead
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+  // Cheeks
+  123, 116, 118, 50, 101, 100, 47, 126, 217, 205, 187, 207, 
+  206, 203, 142, 98, 97, 2, 326, 327, 294, 278, 439, 438, 
+  371, 355, 266, 425, 423, 426, 411, 416, 434, 432, 430
 ];
 
 // Perform face swap with proper landmark-based alignment
@@ -365,35 +424,113 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
         0, 0, srcCropCanvas.width, srcCropCanvas.height
       );
       
-      // Create mask from target face oval
-      const tgtFaceOval = FACE_OVAL_INDICES.map(i => tgtLandmarks[i]);
-      const featherWidth = tgtEyeDist * 0.07;
+      // Create mask from target face oval, shrunk and feathered
+      let tgtFaceOval = FACE_OVAL_INDICES.map(i => tgtLandmarks[i]);
+      
+      // Calculate centroid
+      const centroid = tgtFaceOval.reduce((acc, p) => ({
+        x: acc.x + p.x / tgtFaceOval.length,
+        y: acc.y + p.y / tgtFaceOval.length
+      }), { x: 0, y: 0 });
+      
+      // Shrink mask 5% toward centroid
+      tgtFaceOval = tgtFaceOval.map(p => ({
+        x: p.x + (centroid.x - p.x) * 0.05,
+        y: p.y + (centroid.y - p.y) * 0.05
+      }));
+      
+      // Lower top points below hairline (top ~10% of oval points)
+      const topPointCount = Math.floor(tgtFaceOval.length * 0.15);
+      for (let i = 0; i < topPointCount; i++) {
+        tgtFaceOval[i].y += tgtEyeDist * 0.15;
+      }
       
       const maskCanvas = document.createElement('canvas');
       maskCanvas.width = canvas.width;
       maskCanvas.height = canvas.height;
       const maskCtx = maskCanvas.getContext('2d');
       
-      // Draw feathered polygon mask
-      maskCtx.shadowBlur = featherWidth;
-      maskCtx.shadowColor = 'white';
+      // Draw polygon mask
       maskCtx.fillStyle = 'white';
       maskCtx.beginPath();
       maskCtx.moveTo(tgtFaceOval[0].x, tgtFaceOval[0].y);
       tgtFaceOval.forEach(p => maskCtx.lineTo(p.x, p.y));
       maskCtx.closePath();
       maskCtx.fill();
-      maskCtx.shadowBlur = 0;
-      maskCtx.fill();
       
-      // Draw transformed source face
+      // Apply blur for feathering
+      const blurRadius = Math.round(tgtEyeDist * 0.09);
+      maskCtx.filter = `blur(${blurRadius}px)`;
+      maskCtx.globalCompositeOperation = 'source-atop';
+      maskCtx.drawImage(maskCanvas, 0, 0);
+      maskCtx.filter = 'none';
+      
+      // Color transfer: match source to target skin tone
+      const srcInnerFace = INNER_FACE_INDICES.map(i => srcLandmarks[i]);
+      const tgtInnerFace = INNER_FACE_INDICES.map(i => tgtLandmarks[i]);
+      
+      // Get source face pixels in LAB
+      const srcFaceCanvas = document.createElement('canvas');
+      srcFaceCanvas.width = srcCropCanvas.width;
+      srcFaceCanvas.height = srcCropCanvas.height;
+      const srcFaceCtx = srcFaceCanvas.getContext('2d');
+      srcFaceCtx.drawImage(srcCropCanvas, 0, 0);
+      const srcData = srcFaceCtx.getImageData(0, 0, srcFaceCanvas.width, srcFaceCanvas.height);
+      
+      // Sample colors from inner face regions
+      const sampleColor = (imageData, landmarks, imgW, imgH, cropX, cropY, scale) => {
+        const colors = { L: [], A: [], B: [] };
+        landmarks.forEach(p => {
+          const x = Math.round((p.x - cropX) * scale);
+          const y = Math.round((p.y - cropY) * scale);
+          if (x >= 0 && x < imgW && y >= 0 && y < imgH) {
+            const idx = (y * imgW + x) * 4;
+            const lab = rgbToLab(imageData.data[idx], imageData.data[idx + 1], imageData.data[idx + 2]);
+            colors.L.push(lab[0]);
+            colors.A.push(lab[1]);
+            colors.B.push(lab[2]);
+          }
+        });
+        return colors;
+      };
+      
+      const srcColors = sampleColor(srcData, srcInnerFace, srcFaceCanvas.width, srcFaceCanvas.height, 
+        srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1, 1.2 / (srcMaxX - srcMinX));
+      
+      // Get target color stats
+      const tgtData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const tgtColors = sampleColor(tgtData, tgtInnerFace, canvas.width, canvas.height, 0, 0, 1);
+      
+      // Compute mean and std
+      const mean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+      const std = (arr, m) => Math.sqrt(arr.reduce((a, b) => a + (b - m) ** 2, 0) / arr.length);
+      
+      const srcMean = { L: mean(srcColors.L), A: mean(srcColors.A), B: mean(srcColors.B) };
+      const srcStd = { L: std(srcColors.L, srcMean.L), A: std(srcColors.A, srcMean.A), B: std(srcColors.B, srcMean.B) };
+      const tgtMean = { L: mean(tgtColors.L), A: mean(tgtColors.A), B: mean(tgtColors.B) };
+      const tgtStd = { L: std(tgtColors.L, tgtMean.L), A: std(tgtColors.A, tgtMean.A), B: std(tgtColors.B, tgtMean.B) };
+      
+      // Apply color transfer to source
+      for (let i = 0; i < srcData.data.length; i += 4) {
+        const lab = rgbToLab(srcData.data[i], srcData.data[i + 1], srcData.data[i + 2]);
+        lab[0] = ((lab[0] - srcMean.L) / (srcStd.L + 1e-6)) * tgtStd.L + tgtMean.L;
+        lab[1] = ((lab[1] - srcMean.A) / (srcStd.A + 1e-6)) * tgtStd.A + tgtMean.A;
+        lab[2] = ((lab[2] - srcMean.B) / (srcStd.B + 1e-6)) * tgtStd.B + tgtMean.B;
+        const rgb = labToRgb(lab[0], lab[1], lab[2]);
+        srcData.data[i] = rgb[0];
+        srcData.data[i + 1] = rgb[1];
+        srcData.data[i + 2] = rgb[2];
+      }
+      srcFaceCtx.putImageData(srcData, 0, 0);
+      
+      // Draw transformed source face with color correction
       ctx.save();
       ctx.translate(tgtEyeCenter.x, tgtEyeCenter.y);
       ctx.rotate(rotation);
       ctx.scale(scale, scale);
       ctx.translate(-srcEyeCenter.x, -srcEyeCenter.y);
       ctx.globalCompositeOperation = 'source-over';
-      ctx.drawImage(srcCropCanvas, srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1);
+      ctx.drawImage(srcFaceCanvas, srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1);
       ctx.restore();
       
       // Apply mask

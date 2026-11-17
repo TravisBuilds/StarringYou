@@ -118,9 +118,9 @@ async function runE2E() {
     page.on('console', msg => logToFile(`[Page] ${msg.text()}`));
     page.on('pageerror', err => logToFile(`[Error] ${err.message}`));
     
-    // Navigate to fixture page with test and debug mode enabled
+    // Navigate to fixture page with test mode (debug=false for clean screenshots)
     logToFile('📄 Loading fixture page...');
-    await page.goto('http://localhost:8765/test-fixtures/product-page.html?test=true&debug=true');
+    await page.goto('http://localhost:8765/test-fixtures/product-page.html?test=true');
     await page.waitForLoadState('networkidle');
     
     // Take before screenshot

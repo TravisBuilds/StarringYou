@@ -243,9 +243,9 @@ async function swapImageFace(img) {
       }
     }
     
-    // Perform simple swap with frame metadata
+    // Perform simple swap
     const swappedDataUrl = await performSimpleSwap(
-      selectedFrame,
+      selectedFrame.dataUrl,
       imageData
     );
 
@@ -368,13 +368,14 @@ const INNER_FACE_INDICES = [
 ];
 
 // Perform face swap with proper landmark-based alignment
-async function performSimpleSwap(sourceFrame, targetImageDataUrl) {
+async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
   return new Promise(async (resolve, reject) => {
     try {
-      // Detect faces in both source and target (always detect to match image dimensions)
+      console.log('SWAP_PIPELINE_V20_RUN15');
+      // Detect faces in both source and target
       console.log('StarringYou: Detecting faces...');
       const [sourceFaceData, targetFaceData] = await Promise.all([
-        detectFaceInImage(sourceFrame.dataUrl),
+        detectFaceInImage(sourceFaceDataUrl),
         detectFaceInImage(targetImageDataUrl)
       ]);
       
@@ -398,7 +399,7 @@ async function performSimpleSwap(sourceFrame, targetImageDataUrl) {
       const targetImg = new Image();
       
       await Promise.all([
-        new Promise(r => { sourceImg.onload = r; sourceImg.src = sourceFrame.dataUrl; }),
+        new Promise(r => { sourceImg.onload = r; sourceImg.src = sourceFaceDataUrl; }),
         new Promise(r => { targetImg.onload = r; targetImg.src = targetImageDataUrl; })
       ]);
       

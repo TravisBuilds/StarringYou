@@ -5,9 +5,10 @@
 
 import { chromium } from '@playwright/test';
 import { spawn } from 'child_process';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { tmpdir } from 'os';
 import http from 'http';
 import handler from 'serve-handler';
 
@@ -51,7 +52,11 @@ async function runE2E() {
   const fakeWebcamPath = join(rootDir, 'test-fixtures/fake-webcam-frontal.y4m');
   logToFile(`📹 Using fake webcam: ${fakeWebcamPath}`);
   
-  const context = await chromium.launchPersistentContext('', {
+  // Use fresh temp directory to avoid cached results
+  const tempUserDataDir = mkdtempSync(join(tmpdir(), 'starringyou-e2e-'));
+  logToFile(`📁 Fresh user data dir: ${tempUserDataDir}`);
+  
+  const context = await chromium.launchPersistentContext(tempUserDataDir, {
     headless: false,
     channel: 'chromium',
     args: [

@@ -187,10 +187,12 @@ async function swapImageFace(img) {
   // Check cache first
   const cacheKey = await hashImageUrl(originalSrc);
   if (swapCache.has(cacheKey)) {
-    console.log('StarringYou: Using cached swap');
+    console.log(`StarringYou: CACHE HIT for ${img.src}`);
     applySwappedImage(img, swapCache.get(cacheKey));
     return;
   }
+  
+  console.log(`StarringYou: CACHE MISS for ${img.src}`);
 
   // Show loading indicator
   const wrapper = img.parentElement;

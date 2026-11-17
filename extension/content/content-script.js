@@ -360,6 +360,46 @@ const FACE_OVAL_INDICES = [
   172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
 ];
 
+// Eyebrow landmarks for mask hairline adjustment
+const BROW_INDICES = [70, 63, 105, 66, 107, 336, 296, 334, 293, 300];
+
+// Separable box blur for mask feathering (horizontal then vertical)
+function boxBlurImageData(imageData, radius) {
+  const { width, height, data } = imageData;
+  const kernel = radius * 2 + 1;
+  
+  // Horizontal pass
+  const temp = new Uint8ClampedArray(data.length);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let sum = 0, count = 0;
+      for (let kx = -radius; kx <= radius; kx++) {
+        const sx = x + kx;
+        if (sx >= 0 && sx < width) {
+          sum += data[(y * width + sx) * 4 + 3]; // Alpha channel
+          count++;
+        }
+      }
+      temp[(y * width + x) * 4 + 3] = sum / count;
+    }
+  }
+  
+  // Vertical pass
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let sum = 0, count = 0;
+      for (let ky = -radius; ky <= radius; ky++) {
+        const sy = y + ky;
+        if (sy >= 0 && sy < height) {
+          sum += temp[(sy * width + x) * 4 + 3];
+          count++;
+        }
+      }
+      data[(y * width + x) * 4 + 3] = sum / count;
+    }
+  }
+}
+
 // Inner face region for color transfer (cheeks, forehead - excluding eyes, mouth)
 const INNER_FACE_INDICES = [
   // Forehead
@@ -504,43 +544,50 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
       // Create mask from target face oval, shrunk and feathered
       let tgtFaceOval = FACE_OVAL_INDICES.map(i => tgtLandmarks[i]);
       
+      // Lower top edge to just above eyebrows (avoid hairline seam)
+      const tgtBrows = BROW_INDICES.map(i => tgtLandmarks[i]);
+      const browY = Math.min(...tgtBrows.map(p => p.y));
+      const faceHeight = Math.hypot(tgtEyeCenter.x - tgtChin.x, tgtEyeCenter.y - tgtChin.y);
+      
+      // For top-half points, move down to brow line
+      const topHalfCount = Math.floor(tgtFaceOval.length / 2);
+      for (let i = 0; i < topHalfCount; i++) {
+        tgtFaceOval[i].y = Math.max(tgtFaceOval[i].y, browY - 0.15 * faceHeight);
+      }
+      
       // Calculate centroid
       const centroid = tgtFaceOval.reduce((acc, p) => ({
         x: acc.x + p.x / tgtFaceOval.length,
         y: acc.y + p.y / tgtFaceOval.length
       }), { x: 0, y: 0 });
       
-      // Shrink mask 5% toward centroid
+      // Shrink mask 4% toward centroid
       tgtFaceOval = tgtFaceOval.map(p => ({
-        x: p.x + (centroid.x - p.x) * 0.05,
-        y: p.y + (centroid.y - p.y) * 0.05
+        x: p.x + (centroid.x - p.x) * 0.04,
+        y: p.y + (centroid.y - p.y) * 0.04
       }));
       
-      // Lower top points below hairline (top ~10% of oval points)
-      const topPointCount = Math.floor(tgtFaceOval.length * 0.15);
-      for (let i = 0; i < topPointCount; i++) {
-        tgtFaceOval[i].y += tgtEyeDist * 0.15;
-      }
-      
+      // Create mask with manual feathering
       const maskCanvas = document.createElement('canvas');
       maskCanvas.width = canvas.width;
       maskCanvas.height = canvas.height;
       const maskCtx = maskCanvas.getContext('2d');
       
-      // Draw polygon mask
-      maskCtx.fillStyle = 'white';
+      // Draw polygon mask (alpha in A channel)
+      maskCtx.fillStyle = 'rgba(255, 255, 255, 1)';
       maskCtx.beginPath();
       maskCtx.moveTo(tgtFaceOval[0].x, tgtFaceOval[0].y);
       tgtFaceOval.forEach(p => maskCtx.lineTo(p.x, p.y));
       maskCtx.closePath();
       maskCtx.fill();
       
-      // Apply blur for feathering
-      const blurRadius = Math.round(tgtEyeDist * 0.09);
-      maskCtx.filter = `blur(${blurRadius}px)`;
-      maskCtx.globalCompositeOperation = 'source-atop';
-      maskCtx.drawImage(maskCanvas, 0, 0);
-      maskCtx.filter = 'none';
+      // Apply manual box blur for feathering (3 passes, 6% of face width)
+      const featherRadius = Math.round(tgtEyeDist * 0.06);
+      const maskData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+      for (let pass = 0; pass < 3; pass++) {
+        boxBlurImageData(maskData, featherRadius);
+      }
+      maskCtx.putImageData(maskData, 0, 0);
       
       // Color transfer: RGB-based mean/std matching (more robust than LAB)
       const srcInnerFace = INNER_FACE_INDICES.map(i => srcLandmarks[i]);
@@ -614,23 +661,35 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
         srcFaceCtx.putImageData(srcData, 0, 0);
       }
       
-      // Draw transformed source face with color correction
-      ctx.save();
-      ctx.translate(tgtFaceCenter.x, tgtFaceCenter.y);
-      ctx.rotate(rotation);
-      ctx.scale(scale, scale);
-      ctx.translate(-srcFaceCenter.x, -srcFaceCenter.y);
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.drawImage(srcFaceCanvas, srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1);
-      ctx.restore();
+      // Draw transformed source to temp canvas
+      const warpedCanvas = document.createElement('canvas');
+      warpedCanvas.width = canvas.width;
+      warpedCanvas.height = canvas.height;
+      const warpedCtx = warpedCanvas.getContext('2d');
+      warpedCtx.save();
+      warpedCtx.translate(tgtFaceCenter.x, tgtFaceCenter.y);
+      warpedCtx.rotate(rotation);
+      warpedCtx.scale(scale, scale);
+      warpedCtx.translate(-srcFaceCenter.x, -srcFaceCenter.y);
+      warpedCtx.drawImage(srcFaceCanvas, srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1);
+      warpedCtx.restore();
       
-      // Apply mask
-      ctx.globalCompositeOperation = 'destination-in';
-      ctx.drawImage(maskCanvas, 0, 0);
+      // Manual alpha compositing: result = target*(1-a) + source*a
+      const warpedData = warpedCtx.getImageData(0, 0, canvas.width, canvas.height);
+      const targetData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const resultData = ctx.createImageData(canvas.width, canvas.height);
       
-      // Restore target background with composited face
-      ctx.globalCompositeOperation = 'destination-over';
-      ctx.drawImage(targetImg, 0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < maskData.data.length; i += 4) {
+        const alpha = maskData.data[i + 3] / 255; // Mask alpha
+        
+        // Blend RGB channels
+        resultData.data[i] = targetData.data[i] * (1 - alpha) + warpedData.data[i] * alpha;
+        resultData.data[i + 1] = targetData.data[i + 1] * (1 - alpha) + warpedData.data[i + 1] * alpha;
+        resultData.data[i + 2] = targetData.data[i + 2] * (1 - alpha) + warpedData.data[i + 2] * alpha;
+        resultData.data[i + 3] = 255; // Opaque
+      }
+      
+      ctx.putImageData(resultData, 0, 0);
       
       // Debug exports for model-2
       if (targetOriginalUrl && targetOriginalUrl.includes('model-2')) {
@@ -641,21 +700,9 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
         const debugCtx = debugTarget.getContext('2d');
         debugCtx.drawImage(targetImg, 0, 0);
         
-        const debugWarpedSource = document.createElement('canvas');
-        debugWarpedSource.width = canvas.width;
-        debugWarpedSource.height = canvas.height;
-        const warpedCtx = debugWarpedSource.getContext('2d');
-        warpedCtx.save();
-        warpedCtx.translate(tgtFaceCenter.x, tgtFaceCenter.y);
-        warpedCtx.rotate(rotation);
-        warpedCtx.scale(scale, scale);
-        warpedCtx.translate(-srcFaceCenter.x, -srcFaceCenter.y);
-        warpedCtx.drawImage(srcFaceCanvas, srcMinX - srcWidth * 0.1, srcMinY - srcHeight * 0.1);
-        warpedCtx.restore();
-        
         console.log('DEBUG_EXPORTS', {
           target: debugTarget.toDataURL('image/png'),
-          warpedSource: debugWarpedSource.toDataURL('image/png'),
+          warpedSource: warpedCanvas.toDataURL('image/png'),
           mask: maskCanvas.toDataURL('image/png'),
           result: canvas.toDataURL('image/png')
         });

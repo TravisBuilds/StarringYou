@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fashion Store - Test Fixture</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f8f9fa;
+      color: #212529;
+      line-height: 1.6;
+    }
+
+    header {
+      background: white;
+      border-bottom: 1px solid #dee2e6;
+      padding: 1rem 2rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+
+    .header-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #000;
+    }
+
+    nav a {
+      margin-left: 2rem;
+      color: #6c757d;
+      text-decoration: none;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 2rem auto;
+      padding: 0 2rem;
+    }
+
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 2rem;
+      margin-bottom: 3rem;
+    }
+
+    .product-card {
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      transition: transform 0.2s;
+    }
+
+    .product-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .product-image-container {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 3/4;
+      background: #f1f3f5;
+      overflow: hidden;
+    }
+
+    .product-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .product-info {
+      padding: 1rem;
+    }
+
+    .product-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #212529;
+    }
+
+    .product-price {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #000;
+    }
+
+    .product-description {
+      font-size: 0.875rem;
+      color: #6c757d;
+      margin-top: 0.5rem;
+    }
+
+    h1, h2 {
+      margin-bottom: 1.5rem;
+    }
+
+    .notice {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 2rem;
+      text-align: center;
+    }
+
+    .notice strong {
+      color: #856404;
+    }
+
+    /* Lazy load simulation */
+    .lazy-image {
+      background: #e9ecef;
+      min-height: 400px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-content">
+      <div class="logo">Fashion Store</div>
+      <nav>
+        <a href="#">New Arrivals</a>
+        <a href="#">Men</a>
+        <a href="#">Women</a>
+        <a href="#">Sale</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="notice">
+      <strong>⭐ StarringYou Test Fixture</strong><br>
+      This is a mock product page to test the extension. Load the extension and enable face swap to see yourself in these outfits!
+    </div>
+
+    <h1>Featured Products</h1>
+
+    <div class="product-grid">
+      <!-- Product 1 -->
+      <div class="product-card">
+        <div class="product-image-container">
+          <img src="../public/sample-images/model-1.jpg" 
+               alt="Casual Jacket Style" 
+               class="product-image">
+        </div>
+        <div class="product-info">
+          <h3 class="product-title">Casual Jacket Style</h3>
+          <div class="product-price">$89.99</div>
+          <p class="product-description">Perfect for everyday wear. Comfortable and stylish.</p>
+        </div>
+      </div>
+
+      <!-- Product 2 -->
+      <div class="product-card">
+        <div class="product-image-container">
+          <img src="../public/sample-images/model-2.jpg" 
+               alt="Business Professional Look" 
+               class="product-image">
+        </div>
+        <div class="product-info">
+          <h3 class="product-title">Business Professional Look</h3>
+          <div class="product-price">$129.99</div>
+          <p class="product-description">Sharp and professional for the modern workplace.</p>
+        </div>
+      </div>
+
+      <!-- Product 3 -->
+      <div class="product-card">
+        <div class="product-image-container">
+          <img src="../public/sample-images/model-3.jpg" 
+               alt="Portrait Style Outfit" 
+               class="product-image">
+        </div>
+        <div class="product-info">
+          <h3 class="product-title">Portrait Style Outfit</h3>
+          <div class="product-price">$99.99</div>
+          <p class="product-description">Elegant and versatile for any occasion.</p>
+        </div>
+      </div>
+
+      <!-- Product 4 -->
+      <div class="product-card">
+        <div class="product-image-container">
+          <img src="../public/sample-images/model-4.jpg" 
+               alt="Fashion Forward Collection" 
+               class="product-image">
+        </div>
+        <div class="product-info">
+          <h3 class="product-title">Fashion Forward Collection</h3>
+          <div class="product-price">$149.99</div>
+          <p class="product-description">Bold style statement for trendsetters.</p>
+        </div>
+      </div>
+    </div>
+
+    <h2>More Styles</h2>
+    <div class="product-grid">
+      <!-- Repeated products to test lazy loading -->
+      <div class="product-card">
+        <div class="product-image-container">
+          <img data-src="../public/sample-images/model-1.jpg" 
+               alt="Casual Style Variant" 
+               class="product-image lazy-image"
+               loading="lazy">
+        </div>
+        <div class="product-info">
+          <h3 class="product-title">Casual Style Variant</h3>
+          <div class="product-price">$79.99</div>
+        </div>
+      </div>
+
+      <div class="product-card">
+        <div class="product-image-container">
+          <img data-src="../public/sample-images/model-3.jpg" 
+               alt="Portrait Variant" 
+               class="product-image lazy-image"
+               loading="lazy">
+        </div>
+        <div class="product-info">
+          <h3 class="product-title">Portrait Variant</h3>
+          <div class="product-price">$94.99</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Simulate lazy loading
+    document.addEventListener('DOMContentLoaded', () => {
+      const lazyImages = document.querySelectorAll('.lazy-image');
+      
+      setTimeout(() => {
+        lazyImages.forEach(img => {
+          const src = img.getAttribute('data-src');
+          if (src) {
+            img.src = src;
+            img.classList.remove('lazy-image');
+          }
+        });
+      }, 1000);
+    });
+  </script>
+</body>
+</html>

@@ -48,6 +48,9 @@ async function runE2E() {
   logToFile('🚀 Launching Chrome with extension...');
   logToFile(`📂 Extension path: ${extensionDir}`);
   
+  const fakeWebcamPath = join(rootDir, 'test-fixtures/fake-webcam-frontal.y4m');
+  logToFile(`📹 Using fake webcam: ${fakeWebcamPath}`);
+  
   const context = await chromium.launchPersistentContext('', {
     headless: false,
     channel: 'chromium',
@@ -57,8 +60,11 @@ async function runE2E() {
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      '--use-fake-device-for-media-stream',
+      `--use-file-for-fake-video-capture=${fakeWebcamPath}`,
     ],
     viewport: { width: 1280, height: 720 },
+    permissions: ['camera'],
   });
 
   try {
@@ -101,6 +107,56 @@ async function runE2E() {
     await extensionsPage.close();
     logToFile('✅ Extensions page screenshot saved');
     
+    // Test onboarding first
+    logToFile('📋 Testing onboarding enrollment...');
+    let extensionId = null;
+    if (backgroundPages.length > 0) {
+      const swUrl = backgroundPages[0].url();
+      const match = swUrl.match(/chrome-extension:\/\/([a-z]+)\//);
+      if (match) {
+        extensionId = match[1];
+        logToFile(`📦 Extension ID: ${extensionId}`);
+      }
+    }
+    
+    if (extensionId) {
+      const onboardingPage = await context.newPage();
+      onboardingPage.on('console', msg => logToFile(`[Onboarding] ${msg.text()}`));
+      
+      await onboardingPage.goto(`chrome-extension://${extensionId}/onboarding/onboarding.html`);
+      await onboardingPage.waitForTimeout(1000);
+      
+      // Take screenshot before starting
+      await onboardingPage.screenshot({
+        path: '/cursor/stores/self/onboarding-initial.png'
+      });
+      logToFile('📸 Onboarding initial screenshot saved');
+      
+      // Click start button
+      await onboardingPage.click('#start-btn');
+      logToFile('▶️  Started enrollment');
+      
+      // Wait for enrollment to process
+      await onboardingPage.waitForTimeout(8000);
+      
+      // Take mid-enrollment screenshot
+      await onboardingPage.screenshot({
+        path: '/cursor/stores/self/onboarding-mid.png'
+      });
+      logToFile('📸 Onboarding mid-enrollment screenshot saved');
+      
+      // Wait for completion
+      await onboardingPage.waitForTimeout(5000);
+      
+      // Take final screenshot
+      await onboardingPage.screenshot({
+        path: '/cursor/stores/self/onboarding-complete.png'
+      });
+      logToFile('📸 Onboarding complete screenshot saved');
+      
+      await onboardingPage.close();
+    }
+    
     // Clear swap cache for fresh test via service worker
     logToFile('🧹 Clearing swap cache...');
     if (backgroundPages.length > 0) {
@@ -111,16 +167,16 @@ async function runE2E() {
       logToFile('✅ Cache cleared');
     }
     
-    logToFile('🧪 Using TEST MODE - content script will use hardcoded test face');
+    logToFile('🧪 Testing swap with enrolled face from onboarding');
     
     // Create page and navigate to test fixture with test mode enabled
     const page = await context.newPage();
     page.on('console', msg => logToFile(`[Page] ${msg.text()}`));
     page.on('pageerror', err => logToFile(`[Error] ${err.message}`));
     
-    // Navigate to fixture page with test mode (debug=false for clean screenshots)
+    // Navigate to fixture page (using enrolled face from onboarding)
     logToFile('📄 Loading fixture page...');
-    await page.goto('http://localhost:8765/test-fixtures/product-page.html?test=true');
+    await page.goto('http://localhost:8765/test-fixtures/product-page.html');
     await page.waitForLoadState('networkidle');
     
     // Take before screenshot

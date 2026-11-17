@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StarringYou - Enroll Your Face</title>
+  <style>*{box-sizing:border-box;margin:0;padding:0}body{color:#f1f5f9;background:#0f172a;flex-direction:column;min-height:100vh;font-family:system-ui,-apple-system,sans-serif;display:flex}.container{flex:1;max-width:800px;margin:0 auto;padding:2rem}header{text-align:center;margin-bottom:2rem}h1{background:linear-gradient(135deg,#6366f1 0%,#a855f7 100%);-webkit-text-fill-color:transparent;-webkit-background-clip:text;margin-bottom:.5rem;font-size:2rem}.subtitle{color:#cbd5e1}.enrollment-box{background:#1e293b;border-radius:12px;margin-bottom:1.5rem;padding:2rem}.camera-wrapper{aspect-ratio:4/3;background:#000;border-radius:12px;width:100%;max-width:640px;margin:0 auto 1.5rem;position:relative;overflow:hidden}video{object-fit:cover;width:100%;height:100%}.face-guide{pointer-events:none;width:200px;height:200px;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}.guide-ring{fill:none;stroke:#6366f180;stroke-width:3px}#progress-ring{fill:none;stroke:#10b981;stroke-width:4px;stroke-linecap:round;transform-origin:50%;transition:stroke-dashoffset .3s;transform:rotate(-90deg)}.instruction{text-align:center;color:#f1f5f9;min-height:2em;margin-bottom:1rem;font-size:1.25rem}.step-indicators{justify-content:center;gap:.5rem;margin-bottom:1.5rem;display:flex}.step-dot{background:#334155;border-radius:50%;width:12px;height:12px;transition:all .3s}.step-dot.completed{background:#10b981}.step-dot.active{background:#6366f1;transform:scale(1.3)}.btn{cursor:pointer;border:none;border-radius:8px;padding:.75rem 1.5rem;font-size:1rem;font-weight:600;transition:all .2s}.btn-primary{color:#fff;background:#6366f1}.btn-primary:hover{background:#4f46e5}.btn-danger{color:#fff;background:#ef4444;margin-left:.5rem}.btn-danger:hover{background:#dc2626}.controls{text-align:center}.success-message{color:#fff;text-align:center;background:#10b981;border-radius:8px;margin-bottom:1rem;padding:1rem;display:none}footer{text-align:center;color:#94a3b8;border-top:1px solid #334155;padding:2rem;font-size:.875rem}</style>
+  <script type="module" crossorigin src="/onboarding.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>⭐ StarringYou</h1>
+      <p class="subtitle">Enroll your face to see yourself in any outfit</p>
+    </header>
+
+    <div id="success-msg" class="success-message">
+      ✓ Face enrolled successfully! Close this page and visit shopping sites to swap faces.
+    </div>
+
+    <div class="enrollment-box">
+      <div class="camera-wrapper">
+        <video id="video" autoplay playsinline></video>
+        <div class="face-guide">
+          <svg viewBox="0 0 200 200">
+            <circle cx="100" cy="100" r="80" class="guide-ring" />
+            <circle id="progress-ring" cx="100" cy="100" r="80" 
+                    stroke-dasharray="502" stroke-dashoffset="502" />
+          </svg>
+        </div>
+      </div>
+
+      <p id="instruction" class="instruction">Click Start to begin enrollment</p>
+
+      <div id="step-indicators" class="step-indicators">
+        <div class="step-dot"></div>
+        <div class="step-dot"></div>
+        <div class="step-dot"></div>
+        <div class="step-dot"></div>
+        <div class="step-dot"></div>
+        <div class="step-dot"></div>
+      </div>
+
+      <div class="controls">
+        <button id="start-btn" class="btn btn-primary">Start Enrollment</button>
+        <button id="delete-btn" class="btn btn-danger" style="display: none;">Delete My Face Data</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <p>🔒 Your face data is stored locally on your device and never uploaded to any server</p>
+  </footer>
+
+  <canvas id="canvas" style="display: none;"></canvas>
+  
+</body>
+</html>

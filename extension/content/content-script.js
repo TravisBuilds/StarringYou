@@ -26,7 +26,7 @@ async function init() {
   extensionEnabled = result.enabled || false;
   enrollmentData = result.enrollmentData || null;
   
-  // E2E Test mode: use hardcoded test face
+  // E2E Test mode: use hardcoded test face (only if no real enrollment)
   if (TEST_MODE && !enrollmentData) {
     console.log('StarringYou: TEST MODE - using hardcoded test face');
     extensionEnabled = true;
@@ -34,6 +34,8 @@ async function init() {
       frontalFrame: HARDCODED_TEST_FACE,
       enrolledAt: Date.now()
     };
+  } else if (enrollmentData) {
+    console.log('StarringYou: Using enrolled face data');
   }
   
   // Load cache from storage
@@ -201,9 +203,44 @@ async function swapImageFace(img) {
     // Fetch image (via background to avoid CORS)
     const imageData = await fetchImageViaBackground(originalSrc);
     
-    // Perform simple swap (overlay for now)
+    // Select best enrolled frame based on target pose
+    let sourceFaceUrl = enrollmentData.bestFrontalFrame?.dataUrl || enrollmentData.frontalFrame;
+    
+    // If we have multiple frames with pose data, pick the best match
+    if (enrollmentData.frames && Array.isArray(enrollmentData.frames)) {
+      try {
+        const targetFaceData = await detectFaceInImage(imageData);
+        if (targetFaceData.success && targetFaceData.pose) {
+          // Find frame with closest pose match
+          let bestMatch = null;
+          let bestScore = Infinity;
+          
+          enrollmentData.frames.forEach(frame => {
+            if (frame.pose) {
+              const yawDiff = Math.abs(frame.pose.yaw - targetFaceData.pose.yaw);
+              const pitchDiff = Math.abs(frame.pose.pitch - targetFaceData.pose.pitch);
+              const score = yawDiff + pitchDiff;
+              
+              if (score < bestScore) {
+                bestScore = score;
+                bestMatch = frame;
+              }
+            }
+          });
+          
+          if (bestMatch) {
+            console.log(`StarringYou: Using frame with yaw=${bestMatch.pose.yaw.toFixed(1)}° pitch=${bestMatch.pose.pitch.toFixed(1)}° (score=${bestScore.toFixed(1)})`);
+            sourceFaceUrl = bestMatch.dataUrl;
+          }
+        }
+      } catch (e) {
+        console.log('StarringYou: Could not match pose, using default frame');
+      }
+    }
+    
+    // Perform simple swap
     const swappedDataUrl = await performSimpleSwap(
-      enrollmentData.frontalFrame,
+      sourceFaceUrl,
       imageData
     );
 

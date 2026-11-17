@@ -96,6 +96,26 @@ async function detectFace(imageDataObj) {
     const nose = landmarks[1];        // Nose tip
     const mouth = landmarks[13];      // Mouth center
     
+    // Estimate head pose (simplified)
+    const leftTemple = landmarks[234];
+    const rightTemple = landmarks[454];
+    const chinBottom = landmarks[152];
+    const foreheadCenter = landmarks[10];
+    
+    // Yaw: horizontal face angle
+    const faceWidth = Math.abs(rightTemple.x - leftTemple.x);
+    const leftDist = Math.abs(nose.x - leftTemple.x);
+    const rightDist = Math.abs(rightTemple.x - nose.x);
+    const yaw = ((leftDist - rightDist) / faceWidth) * 45;
+    
+    // Pitch: vertical face angle
+    const faceHeight = Math.abs(chinBottom.y - foreheadCenter.y);
+    const noseToChin = Math.abs(chinBottom.y - nose.y);
+    const pitch = ((noseToChin / faceHeight) - 0.5) * 60 - 10;
+    
+    // Roll: face rotation
+    const roll = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x) * (180 / Math.PI);
+    
     return {
       success: true,
       landmarks: landmarks.map(p => ({ x: p.x, y: p.y, z: p.z })),
@@ -110,6 +130,11 @@ async function detectFace(imageDataObj) {
         rightEye: { x: rightEye.x, y: rightEye.y },
         nose: { x: nose.x, y: nose.y },
         mouth: { x: mouth.x, y: mouth.y }
+      },
+      pose: {
+        yaw: yaw,
+        pitch: pitch,
+        roll: roll
       }
     };
   } catch (error) {

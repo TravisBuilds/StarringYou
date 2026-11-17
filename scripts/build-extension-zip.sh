@@ -3,9 +3,9 @@ set -e
 
 echo "🔨 Building StarringYou extension package..."
 
-# Build offscreen bundle
-echo "📦 Building offscreen bundle..."
-npm run build:offscreen
+# Build extension bundles
+echo "📦 Building extension bundles..."
+npm run build:extension
 
 # Remove duplicates from dist AFTER build
 rm -rf extension/dist/mediapipe extension/dist/sample-images

@@ -7,6 +7,8 @@
     "dev": "vite --port 43123",
     "build": "tsc && vite build",
     "build:offscreen": "vite build --config vite.config.offscreen.ts",
+    "build:onboarding": "vite build --config vite.config.onboarding.ts",
+    "build:extension": "npm run build:offscreen && npm run build:onboarding",
     "preview": "vite preview",
     "test": "vitest",
     "e2e": "xvfb-run -a node scripts/e2e.mjs"

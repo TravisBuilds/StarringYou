@@ -500,13 +500,15 @@ async function getCachedSourceData(sourceFaceDataUrl) {
 async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOriginalUrl) {
   return new Promise(async (resolve, reject) => {
     try {
-      console.log('SWAP_PIPELINE_V22_DEBUG');
+      const timings = { start: performance.now() };
+      console.log('SWAP_PIPELINE_V23_DEBUG');
       // Get cached source data and detect target face
       console.log('StarringYou: Processing faces...');
       const [sourceData, targetFaceData] = await Promise.all([
         getCachedSourceData(sourceFaceDataUrl),
         detectFaceInImage(targetImageDataUrl)
       ]);
+      timings.detect = performance.now() - timings.start;
       
       if (!targetFaceData.success) {
         console.log('StarringYou: No face in target, skipping');
@@ -562,8 +564,31 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
       const tgtEyeDist = Math.hypot(tgtRightEye.x - tgtLeftEye.x, tgtRightEye.y - tgtLeftEye.y);
       const tgtAngle = Math.atan2(tgtRightEye.y - tgtLeftEye.y, tgtRightEye.x - tgtLeftEye.x);
       
-      // Uniform scale (true similarity transform)
-      const scale = tgtEyeDist / sourceData.eyeDist;
+      // Least-squares similarity transform from key landmarks
+      const tgtNoseTip = tgtLandmarks[1];
+      const srcNoseTip = sourceData.landmarks[1];
+      const srcMouthLeft = sourceData.landmarks[61];
+      const srcMouthRight = sourceData.landmarks[291];
+      const srcChin = sourceData.landmarks[152];
+      const srcLeftEye = sourceData.landmarks[33];
+      const srcRightEye = sourceData.landmarks[263];
+      
+      // Collect corresponding point pairs (source -> target)
+      const srcPts = [srcLeftEye, srcRightEye, srcNoseTip, srcMouthLeft, srcMouthRight, srcChin];
+      const tgtPts = [tgtLeftEye, tgtRightEye, tgtNoseTip, tgtMouthLeft, tgtMouthRight, tgtChin];
+      
+      // Compute centroids
+      const srcCentroid = srcPts.reduce((acc, p) => ({ x: acc.x + p.x / 6, y: acc.y + p.y / 6 }), { x: 0, y: 0 });
+      const tgtCentroid = tgtPts.reduce((acc, p) => ({ x: acc.x + p.x / 6, y: acc.y + p.y / 6 }), { x: 0, y: 0 });
+      
+      // Center points
+      const srcCentered = srcPts.map(p => ({ x: p.x - srcCentroid.x, y: p.y - srcCentroid.y }));
+      const tgtCentered = tgtPts.map(p => ({ x: p.x - tgtCentroid.x, y: p.y - tgtCentroid.y }));
+      
+      // Compute scale from average distances to centroid
+      const srcScale = Math.sqrt(srcCentered.reduce((sum, p) => sum + p.x * p.x + p.y * p.y, 0) / 6);
+      const tgtScale = Math.sqrt(tgtCentered.reduce((sum, p) => sum + p.x * p.x + p.y * p.y, 0) / 6);
+      const scale = tgtScale / srcScale;
       const rotation = tgtAngle - sourceData.angle;
       
       // Create mask from target face oval, shrunk and feathered
@@ -592,22 +617,33 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
         y: p.y + (centroid.y - p.y) * 0.04
       }));
       
-      // Create mask with optimized feathering (1/4 res blur then upscale)
+      // Calculate mask bbox with padding
+      const maskMinX = Math.max(0, Math.floor(Math.min(...tgtFaceOval.map(p => p.x)) - tgtEyeDist * 0.5));
+      const maskMaxX = Math.min(canvas.width, Math.ceil(Math.max(...tgtFaceOval.map(p => p.x)) + tgtEyeDist * 0.5));
+      const maskMinY = Math.max(0, Math.floor(Math.min(...tgtFaceOval.map(p => p.y)) - tgtEyeDist * 0.5));
+      const maskMaxY = Math.min(canvas.height, Math.ceil(Math.max(...tgtFaceOval.map(p => p.y)) + tgtEyeDist * 0.5));
+      const maskWidth = maskMaxX - maskMinX;
+      const maskHeight = maskMaxY - maskMinY;
+      
+      // Create mask at 1/4 res within bbox only
       const downscale = 4;
       const smallMask = document.createElement('canvas');
-      smallMask.width = Math.ceil(canvas.width / downscale);
-      smallMask.height = Math.ceil(canvas.height / downscale);
+      smallMask.width = Math.ceil(maskWidth / downscale);
+      smallMask.height = Math.ceil(maskHeight / downscale);
       const smallCtx = smallMask.getContext('2d');
       
-      // Draw polygon mask at 1/4 res
+      // Draw polygon mask at 1/4 res (offset by bbox origin)
       smallCtx.fillStyle = 'rgba(255, 255, 255, 1)';
       smallCtx.beginPath();
-      smallCtx.moveTo(tgtFaceOval[0].x / downscale, tgtFaceOval[0].y / downscale);
-      tgtFaceOval.forEach(p => smallCtx.lineTo(p.x / downscale, p.y / downscale));
+      const firstPt = tgtFaceOval[0];
+      smallCtx.moveTo((firstPt.x - maskMinX) / downscale, (firstPt.y - maskMinY) / downscale);
+      tgtFaceOval.forEach(p => {
+        smallCtx.lineTo((p.x - maskMinX) / downscale, (p.y - maskMinY) / downscale);
+      });
       smallCtx.closePath();
       smallCtx.fill();
       
-      // Apply box blur at 1/4 res (much faster)
+      // Apply box blur at 1/4 res
       const featherRadius = Math.max(1, Math.round((tgtEyeDist * 0.06) / downscale));
       const smallMaskData = smallCtx.getImageData(0, 0, smallMask.width, smallMask.height);
       for (let pass = 0; pass < 3; pass++) {
@@ -615,16 +651,18 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
       }
       smallCtx.putImageData(smallMaskData, 0, 0);
       
-      // Upscale to full res
+      // Upscale back into exact bbox on full-res mask canvas
       const maskCanvas = document.createElement('canvas');
       maskCanvas.width = canvas.width;
       maskCanvas.height = canvas.height;
       const maskCtx = maskCanvas.getContext('2d');
       maskCtx.imageSmoothingEnabled = true;
       maskCtx.imageSmoothingQuality = 'high';
-      maskCtx.drawImage(smallMask, 0, 0, maskCanvas.width, maskCanvas.height);
+      maskCtx.drawImage(smallMask, 0, 0, smallMask.width, smallMask.height, 
+                        maskMinX, maskMinY, maskWidth, maskHeight);
       
       const maskData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+      timings.maskEnd = performance.now();
       
       // Color transfer: RGB-based mean/std matching (more robust than LAB)
       const srcInnerFace = INNER_FACE_INDICES.map(i => sourceData.landmarks[i]);
@@ -705,19 +743,21 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
       srcColorCorrected.height = srcData.height;
       const srcColorCtx = srcColorCorrected.getContext('2d');
       srcColorCtx.putImageData(srcData, 0, 0);
+      timings.colorEnd = performance.now();
       
-      // Draw transformed source to temp canvas
+      // Draw transformed source to temp canvas (centered on landmark centroids)
       const warpedCanvas = document.createElement('canvas');
       warpedCanvas.width = canvas.width;
       warpedCanvas.height = canvas.height;
       const warpedCtx = warpedCanvas.getContext('2d');
       warpedCtx.save();
-      warpedCtx.translate(tgtFaceCenter.x, tgtFaceCenter.y);
+      warpedCtx.translate(tgtCentroid.x, tgtCentroid.y);
       warpedCtx.rotate(rotation);
       warpedCtx.scale(scale, scale);
-      warpedCtx.translate(-sourceData.faceCenter.x, -sourceData.faceCenter.y);
+      warpedCtx.translate(-srcCentroid.x, -srcCentroid.y);
       warpedCtx.drawImage(srcColorCorrected, sourceData.cropX, sourceData.cropY);
       warpedCtx.restore();
+      timings.warpEnd = performance.now();
       
       // Calculate face bounding box (with padding)
       const faceMinX = Math.max(0, Math.floor(Math.min(...tgtFaceOval.map(p => p.x)) - tgtEyeDist * 0.5));
@@ -745,6 +785,7 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
       }
       
       ctx.putImageData(resultData, faceMinX, faceMinY);
+      timings.blendEnd = performance.now();
       
       // Debug exports for model-2
       if (targetOriginalUrl && targetOriginalUrl.includes('model-2')) {
@@ -780,7 +821,22 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOr
         });
       }
       
-      resolve(canvas.toDataURL('image/jpeg', 0.92));
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      timings.encodeEnd = performance.now();
+      
+      // Calculate breakdown
+      const breakdown = {
+        detect: Math.round(timings.detect),
+        mask: Math.round(timings.maskEnd - timings.start - timings.detect),
+        color: Math.round(timings.colorEnd - timings.maskEnd),
+        warp: Math.round(timings.warpEnd - timings.colorEnd),
+        blend: Math.round(timings.blendEnd - timings.warpEnd),
+        encode: Math.round(timings.encodeEnd - timings.blendEnd),
+        total: Math.round(timings.encodeEnd - timings.start)
+      };
+      console.log(`StarringYou: Timing breakdown (ms): detect=${breakdown.detect} mask=${breakdown.mask} color=${breakdown.color} warp=${breakdown.warp} blend=${breakdown.blend} encode=${breakdown.encode} total=${breakdown.total}`);
+      
+      resolve(dataUrl);
     } catch (error) {
       console.error('StarringYou: Face swap error:', error);
       reject(error);

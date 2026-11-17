@@ -204,7 +204,12 @@ async function swapImageFace(img) {
     const imageData = await fetchImageViaBackground(originalSrc);
     
     // Select best enrolled frame based on target pose
-    let sourceFaceUrl = enrollmentData.bestFrontalFrame?.dataUrl || enrollmentData.frontalFrame;
+    let selectedFrame = enrollmentData.bestFrontalFrame || { 
+      dataUrl: enrollmentData.frontalFrame,
+      landmarks: null,
+      width: null,
+      height: null
+    };
     
     // If we have multiple frames with pose data, pick the best match
     if (enrollmentData.frames && Array.isArray(enrollmentData.frames)) {
@@ -230,7 +235,7 @@ async function swapImageFace(img) {
           
           if (bestMatch) {
             console.log(`StarringYou: Using frame with yaw=${bestMatch.pose.yaw.toFixed(1)}° pitch=${bestMatch.pose.pitch.toFixed(1)}° (score=${bestScore.toFixed(1)})`);
-            sourceFaceUrl = bestMatch.dataUrl;
+            selectedFrame = bestMatch;
           }
         }
       } catch (e) {
@@ -238,9 +243,9 @@ async function swapImageFace(img) {
       }
     }
     
-    // Perform simple swap
+    // Perform simple swap with frame metadata
     const swappedDataUrl = await performSimpleSwap(
-      sourceFaceUrl,
+      selectedFrame,
       imageData
     );
 
@@ -363,15 +368,29 @@ const INNER_FACE_INDICES = [
 ];
 
 // Perform face swap with proper landmark-based alignment
-async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
+async function performSimpleSwap(sourceFrame, targetImageDataUrl) {
   return new Promise(async (resolve, reject) => {
     try {
-      // Detect faces in both source and target
+      // Detect faces - use stored landmarks for source if available
       console.log('StarringYou: Detecting faces...');
-      const [sourceFaceData, targetFaceData] = await Promise.all([
-        detectFaceInImage(sourceFaceDataUrl),
-        detectFaceInImage(targetImageDataUrl)
-      ]);
+      
+      let sourceFaceData;
+      if (sourceFrame.landmarks && sourceFrame.width && sourceFrame.height) {
+        // Use stored landmarks from enrollment
+        // sourceFrame.landmarks is a FaceLandmarks object with {landmarks: Array, blendshapes?: Array}
+        sourceFaceData = {
+          success: true,
+          landmarks: sourceFrame.landmarks.landmarks || sourceFrame.landmarks,
+          width: sourceFrame.width,
+          height: sourceFrame.height
+        };
+        console.log('StarringYou: Using stored landmarks from enrollment');
+      } else {
+        // Detect landmarks from image
+        sourceFaceData = await detectFaceInImage(sourceFrame.dataUrl);
+      }
+      
+      const targetFaceData = await detectFaceInImage(targetImageDataUrl);
       
       if (!targetFaceData.success) {
         console.log('StarringYou: No face in target, skipping');
@@ -393,7 +412,7 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
       const targetImg = new Image();
       
       await Promise.all([
-        new Promise(r => { sourceImg.onload = r; sourceImg.src = sourceFaceDataUrl; }),
+        new Promise(r => { sourceImg.onload = r; sourceImg.src = sourceFrame.dataUrl; }),
         new Promise(r => { targetImg.onload = r; targetImg.src = targetImageDataUrl; })
       ]);
       
@@ -405,9 +424,12 @@ async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl) {
       ctx.drawImage(targetImg, 0, 0, canvas.width, canvas.height);
       
       // Get landmarks in pixel coordinates
+      // If frame has stored dimensions, use those; otherwise use image natural dimensions
+      const srcFrameWidth = sourceFaceData.width || sourceImg.naturalWidth;
+      const srcFrameHeight = sourceFaceData.height || sourceImg.naturalHeight;
       const srcLandmarks = sourceFaceData.landmarks.map(p => ({
-        x: p.x * sourceImg.naturalWidth,
-        y: p.y * sourceImg.naturalHeight
+        x: p.x * srcFrameWidth,
+        y: p.y * srcFrameHeight
       }));
       
       const tgtLandmarks = targetFaceData.landmarks.map(p => ({

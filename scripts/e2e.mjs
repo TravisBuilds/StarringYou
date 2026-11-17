@@ -123,7 +123,8 @@ async function runE2E() {
       const onboardingPage = await context.newPage();
       onboardingPage.on('console', msg => logToFile(`[Onboarding] ${msg.text()}`));
       
-      await onboardingPage.goto(`chrome-extension://${extensionId}/onboarding/onboarding.html`);
+      // Add ?e2e=1 query param for relaxed tolerances with fake webcam
+      await onboardingPage.goto(`chrome-extension://${extensionId}/onboarding/onboarding.html?e2e=1`);
       await onboardingPage.waitForTimeout(1000);
       
       // Take screenshot before starting
@@ -136,17 +137,17 @@ async function runE2E() {
       await onboardingPage.click('#start-btn');
       logToFile('▶️  Started enrollment');
       
-      // Wait for enrollment to process
-      await onboardingPage.waitForTimeout(8000);
+      // Wait for step 1 to complete (~1 second for step 0, ~1 second for step 1)
+      await onboardingPage.waitForTimeout(2000);
       
-      // Take mid-enrollment screenshot
+      // Take mid-enrollment screenshot (should show video + step 1-2 active)
       await onboardingPage.screenshot({
         path: '/cursor/stores/self/onboarding-mid.png'
       });
       logToFile('📸 Onboarding mid-enrollment screenshot saved');
       
-      // Wait for completion
-      await onboardingPage.waitForTimeout(5000);
+      // Wait for remaining steps to complete (~4 more steps * 0.5s = 2s, plus buffer)
+      await onboardingPage.waitForTimeout(4000);
       
       // Take final screenshot
       await onboardingPage.screenshot({

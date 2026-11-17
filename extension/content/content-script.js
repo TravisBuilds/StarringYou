@@ -1,0 +1,965 @@
+/**
+ * StarringYou - Content Script
+ * Detects and swaps faces on product images
+ */
+
+console.log('⭐ StarringYou content script loaded');
+
+// E2E Testing: Hardcoded test face (will be overridden by real enrollment)
+const TEST_MODE = window.location.search.includes('test=true');
+const HARDCODED_TEST_FACE = 'http://localhost:8765/public/sample-images/model-2.jpg';
+const DEBUG_MODE = window.location.search.includes('debug=true');
+
+console.log('⭐ TEST_MODE:', TEST_MODE);
+console.log('⭐ DEBUG_MODE:', DEBUG_MODE);
+
+// Extension state
+let extensionEnabled = false;
+let enrollmentData = null;
+let autoSwapMode = true;
+let swapCache = new Map();
+let cachedSourceData = null; // Cache processed source face data
+
+// Sequential processing queue
+const swapQueue = [];
+let isProcessingQueue = false;
+
+async function processSwapQueue() {
+  if (isProcessingQueue || swapQueue.length === 0) return;
+  
+  isProcessingQueue = true;
+  while (swapQueue.length > 0) {
+    const { img, resolve, reject } = swapQueue.shift();
+    try {
+      await swapImageFaceInternal(img);
+      resolve();
+    } catch (error) {
+      reject(error);
+    }
+  }
+  isProcessingQueue = false;
+}
+
+// Initialize
+async function init() {
+  // Get initial state
+  const result = await chrome.storage.local.get(['enabled', 'enrollmentData', 'swapCache']);
+  extensionEnabled = result.enabled || false;
+  enrollmentData = result.enrollmentData || null;
+  
+  // E2E Test mode: use hardcoded test face (only if no real enrollment)
+  if (TEST_MODE && !enrollmentData) {
+    console.log('StarringYou: TEST MODE - using hardcoded test face');
+    extensionEnabled = true;
+    enrollmentData = {
+      frontalFrame: HARDCODED_TEST_FACE,
+      enrolledAt: Date.now()
+    };
+  } else if (enrollmentData) {
+    console.log('StarringYou: Using enrolled face data');
+  }
+  
+  // Load cache from storage
+  if (result.swapCache) {
+    swapCache = new Map(Object.entries(result.swapCache));
+  }
+
+  if (extensionEnabled && enrollmentData) {
+    console.log('StarringYou: Extension active, scanning for product images');
+    scanForProductImages();
+  }
+}
+
+// Listen for state changes
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local') {
+    if (changes.enabled) {
+      extensionEnabled = changes.enabled.newValue;
+      if (extensionEnabled && enrollmentData) {
+        scanForProductImages();
+      } else {
+        removeAllSwaps();
+      }
+    }
+    if (changes.enrollmentData) {
+      enrollmentData = changes.enrollmentData.newValue;
+      // Clear caches when enrollment changes
+      swapCache.clear();
+      cachedSourceData = null;
+      chrome.storage.local.set({ swapCache: {} });
+    }
+  }
+});
+
+// Scan page for product images
+function scanForProductImages() {
+  // Find all images on the page
+  const images = document.querySelectorAll('img');
+  
+  images.forEach(img => {
+    // Skip if already processed
+    if (img.hasAttribute('data-starringyou-processed')) {
+      return;
+    }
+
+    // Check if image is large enough (likely a product image)
+    if (img.naturalWidth >= 200 && img.naturalHeight >= 200) {
+      processImage(img);
+    } else {
+      // Wait for image to load
+      img.addEventListener('load', () => {
+        if (img.naturalWidth >= 200 && img.naturalHeight >= 200) {
+          processImage(img);
+        }
+      }, { once: true });
+    }
+  });
+
+  // Observe DOM for new images (lazy loading)
+  observeNewImages();
+}
+
+// Process a single image
+async function processImage(img) {
+  img.setAttribute('data-starringyou-processed', 'true');
+  
+  // Create wrapper for hover button
+  const wrapper = createImageWrapper(img);
+  
+  // Add hover button for manual swap
+  const starBtn = createStarButton();
+  wrapper.appendChild(starBtn);
+  
+  starBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await swapImageFace(img);
+  });
+
+  // Auto-swap if enabled
+  if (autoSwapMode) {
+    // Check if image likely contains a face (simple heuristic: portrait orientation)
+    const aspectRatio = img.naturalWidth / img.naturalHeight;
+    if (aspectRatio > 0.5 && aspectRatio < 2.0) {
+      await swapImageFace(img);
+    }
+  }
+}
+
+// Create wrapper around image for positioning buttons
+function createImageWrapper(img) {
+  // Check if already wrapped
+  if (img.parentElement?.classList.contains('starringyou-wrapper')) {
+    return img.parentElement;
+  }
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'starringyou-wrapper';
+  wrapper.style.position = 'relative';
+  wrapper.style.display = 'inline-block';
+  wrapper.style.maxWidth = '100%';
+  
+  img.parentNode.insertBefore(wrapper, img);
+  wrapper.appendChild(img);
+  
+  return wrapper;
+}
+
+// Create "Star me" button
+function createStarButton() {
+  const btn = document.createElement('button');
+  btn.className = 'starringyou-star-btn';
+  btn.innerHTML = '⭐ Star me';
+  btn.title = 'Swap face with StarringYou';
+  return btn;
+}
+
+// Create toggle badge
+function createToggleBadge(img, originalSrc) {
+  const badge = document.createElement('button');
+  badge.className = 'starringyou-toggle-badge';
+  badge.innerHTML = '🔄';
+  badge.title = 'Toggle original / swapped';
+  
+  let showingSwapped = true;
+  badge.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    showingSwapped = !showingSwapped;
+    if (showingSwapped) {
+      const swappedSrc = img.getAttribute('data-starringyou-swapped');
+      if (swappedSrc) {
+        img.src = swappedSrc;
+      }
+      badge.style.background = '#10b981';
+    } else {
+      img.src = originalSrc;
+      badge.style.background = '#6366f1';
+    }
+  });
+  
+  return badge;
+}
+
+// Queue swap for sequential processing
+async function swapImageFace(img) {
+  return new Promise((resolve, reject) => {
+    swapQueue.push({ img, resolve, reject });
+    processSwapQueue();
+  });
+}
+
+// Perform face swap on image (internal - called by queue)
+async function swapImageFaceInternal(img) {
+  const startTime = performance.now();
+  const originalSrc = img.src;
+  
+  // Check cache first
+  const cacheKey = await hashImageUrl(originalSrc);
+  if (swapCache.has(cacheKey)) {
+    console.log(`StarringYou: CACHE HIT for ${img.src}`);
+    applySwappedImage(img, swapCache.get(cacheKey));
+    img.setAttribute('data-starringyou-state', 'done');
+    return;
+  }
+  
+  console.log(`StarringYou: CACHE MISS for ${img.src}`);
+  img.setAttribute('data-starringyou-state', 'processing');
+
+  // Show loading indicator
+  const wrapper = img.parentElement;
+  const loader = document.createElement('div');
+  loader.className = 'starringyou-loader';
+  loader.innerHTML = '⭐ Swapping...';
+  wrapper.appendChild(loader);
+
+  try {
+    // Fetch image (via background to avoid CORS)
+    const imageData = await fetchImageViaBackground(originalSrc);
+    
+    // Select best enrolled frame based on target pose
+    let selectedFrame = enrollmentData.bestFrontalFrame || { 
+      dataUrl: enrollmentData.frontalFrame,
+      landmarks: null,
+      width: null,
+      height: null
+    };
+    
+    // If we have multiple frames with pose data, pick the best match
+    if (enrollmentData.frames && Array.isArray(enrollmentData.frames)) {
+      try {
+        const targetFaceData = await detectFaceInImage(imageData);
+        if (targetFaceData.success && targetFaceData.pose) {
+          // Find frame with closest pose match
+          let bestMatch = null;
+          let bestScore = Infinity;
+          
+          enrollmentData.frames.forEach(frame => {
+            if (frame.pose) {
+              const yawDiff = Math.abs(frame.pose.yaw - targetFaceData.pose.yaw);
+              const pitchDiff = Math.abs(frame.pose.pitch - targetFaceData.pose.pitch);
+              const score = yawDiff + pitchDiff;
+              
+              if (score < bestScore) {
+                bestScore = score;
+                bestMatch = frame;
+              }
+            }
+          });
+          
+          if (bestMatch) {
+            console.log(`StarringYou: Using frame with yaw=${bestMatch.pose.yaw.toFixed(1)}° pitch=${bestMatch.pose.pitch.toFixed(1)}° (score=${bestScore.toFixed(1)})`);
+            selectedFrame = bestMatch;
+          }
+        }
+      } catch (e) {
+        console.log('StarringYou: Could not match pose, using default frame');
+      }
+    }
+    
+    // Perform simple swap
+    const swappedDataUrl = await performSimpleSwap(
+      selectedFrame.dataUrl,
+      imageData,
+      originalSrc
+    );
+
+    // Skip if no face detected
+    if (!swappedDataUrl) {
+      console.log('StarringYou: Skipping image (no face)');
+      return;
+    }
+
+    // Cache result
+    swapCache.set(cacheKey, swappedDataUrl);
+    await saveSwapCache();
+
+    // Apply swapped image
+    applySwappedImage(img, swappedDataUrl);
+    
+    const duration = Math.round(performance.now() - startTime);
+    console.log(`StarringYou: Swap completed in ${duration}ms for ${originalSrc}`);
+    img.setAttribute('data-starringyou-state', 'done');
+    
+  } catch (error) {
+    console.error('StarringYou: Swap failed:', error);
+    img.setAttribute('data-starringyou-state', 'error');
+  } finally {
+    loader.remove();
+  }
+}
+
+// Fetch image via background script to avoid CORS
+async function fetchImageViaBackground(url) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { action: 'fetchImage', url },
+      (response) => {
+        if (response && response.success) {
+          resolve(response.dataUrl);
+        } else {
+          reject(new Error(response?.error || 'Failed to fetch image'));
+        }
+      }
+    );
+  });
+}
+
+// RGB to LAB color space conversion
+function rgbToLab(r, g, b) {
+  // RGB to XYZ
+  r = r / 255; g = g / 255; b = b / 255;
+  r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
+  g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
+  b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
+  
+  let x = r * 0.4124 + g * 0.3576 + b * 0.1805;
+  let y = r * 0.2126 + g * 0.7152 + b * 0.0722;
+  let z = r * 0.0193 + g * 0.1192 + b * 0.9505;
+  
+  // XYZ to LAB
+  x = x / 0.95047; y = y / 1.00000; z = z / 1.08883;
+  x = x > 0.008856 ? Math.pow(x, 1/3) : (7.787 * x + 16/116);
+  y = y > 0.008856 ? Math.pow(y, 1/3) : (7.787 * y + 16/116);
+  z = z > 0.008856 ? Math.pow(z, 1/3) : (7.787 * z + 16/116);
+  
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+}
+
+function labToRgb(l, a, b) {
+  // LAB to XYZ
+  let y = (l + 16) / 116;
+  let x = a / 500 + y;
+  let z = y - b / 200;
+  
+  x = Math.pow(x, 3) > 0.008856 ? Math.pow(x, 3) : (x - 16/116) / 7.787;
+  y = Math.pow(y, 3) > 0.008856 ? Math.pow(y, 3) : (y - 16/116) / 7.787;
+  z = Math.pow(z, 3) > 0.008856 ? Math.pow(z, 3) : (z - 16/116) / 7.787;
+  
+  x *= 0.95047; y *= 1.00000; z *= 1.08883;
+  
+  // XYZ to RGB
+  let r = x *  3.2406 + y * -1.5372 + z * -0.4986;
+  let g = x * -0.9689 + y *  1.8758 + z *  0.0415;
+  let b_ = x *  0.0557 + y * -0.2040 + z *  1.0570;
+  
+  r = r > 0.0031308 ? 1.055 * Math.pow(r, 1/2.4) - 0.055 : 12.92 * r;
+  g = g > 0.0031308 ? 1.055 * Math.pow(g, 1/2.4) - 0.055 : 12.92 * g;
+  b_ = b_ > 0.0031308 ? 1.055 * Math.pow(b_, 1/2.4) - 0.055 : 12.92 * b_;
+  
+  return [
+    Math.max(0, Math.min(255, Math.round(r * 255))),
+    Math.max(0, Math.min(255, Math.round(g * 255))),
+    Math.max(0, Math.min(255, Math.round(b_ * 255)))
+  ];
+}
+
+// Detect face in target image via background/offscreen
+async function detectFaceInImage(imageUrl) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { action: 'detectFaceInImage', imageUrl },
+      (response) => {
+        if (response && response.success) {
+          resolve(response);
+        } else {
+          reject(new Error(response?.error || 'Face detection failed'));
+        }
+      }
+    );
+  });
+}
+
+// Get face oval landmark indices (MediaPipe 478-point mesh)
+const FACE_OVAL_INDICES = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+  397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
+  172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
+];
+
+// Eyebrow landmarks for mask hairline adjustment
+const BROW_INDICES = [70, 63, 105, 66, 107, 336, 296, 334, 293, 300];
+
+// Separable box blur for mask feathering (horizontal then vertical)
+function boxBlurImageData(imageData, radius) {
+  const { width, height, data } = imageData;
+  const kernel = radius * 2 + 1;
+  
+  // Horizontal pass
+  const temp = new Uint8ClampedArray(data.length);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let sum = 0, count = 0;
+      for (let kx = -radius; kx <= radius; kx++) {
+        const sx = x + kx;
+        if (sx >= 0 && sx < width) {
+          sum += data[(y * width + sx) * 4 + 3]; // Alpha channel
+          count++;
+        }
+      }
+      temp[(y * width + x) * 4 + 3] = sum / count;
+    }
+  }
+  
+  // Vertical pass
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let sum = 0, count = 0;
+      for (let ky = -radius; ky <= radius; ky++) {
+        const sy = y + ky;
+        if (sy >= 0 && sy < height) {
+          sum += temp[(sy * width + x) * 4 + 3];
+          count++;
+        }
+      }
+      data[(y * width + x) * 4 + 3] = sum / count;
+    }
+  }
+}
+
+// Inner face region for color transfer (cheeks, forehead - excluding eyes, mouth)
+const INNER_FACE_INDICES = [
+  // Forehead
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+  // Cheeks
+  123, 116, 118, 50, 101, 100, 47, 126, 217, 205, 187, 207, 
+  206, 203, 142, 98, 97, 2, 326, 327, 294, 278, 439, 438, 
+  371, 355, 266, 425, 423, 426, 411, 416, 434, 432, 430
+];
+
+// Perform face swap with proper landmark-based alignment
+// Get or compute cached source face data
+async function getCachedSourceData(sourceFaceDataUrl) {
+  if (cachedSourceData && cachedSourceData.dataUrl === sourceFaceDataUrl) {
+    return cachedSourceData;
+  }
+  
+  const sourceFaceData = await detectFaceInImage(sourceFaceDataUrl);
+  if (!sourceFaceData.success) {
+    return null;
+  }
+  
+  const sourceImg = new Image();
+  await new Promise(r => { sourceImg.onload = r; sourceImg.src = sourceFaceDataUrl; });
+  
+  // Use originalWidth/Height from detection result (image dimensions before downscaling)
+  const imgWidth = sourceFaceData.originalWidth || sourceImg.naturalWidth;
+  const imgHeight = sourceFaceData.originalHeight || sourceImg.naturalHeight;
+  
+  const srcLandmarks = sourceFaceData.landmarks.map(p => ({
+    x: p.x * imgWidth,
+    y: p.y * imgHeight
+  }));
+  
+  // Compute source face properties
+  const srcFaceOval = FACE_OVAL_INDICES.map(i => srcLandmarks[i]);
+  const srcLeftEye = srcLandmarks[33];
+  const srcRightEye = srcLandmarks[263];
+  const srcMouthLeft = srcLandmarks[61];
+  const srcMouthRight = srcLandmarks[291];
+  const srcChin = srcLandmarks[152];
+  
+  const srcEyeCenter = { 
+    x: (srcLeftEye.x + srcRightEye.x) / 2,
+    y: (srcLeftEye.y + srcRightEye.y) / 2
+  };
+  const srcMouthCenter = {
+    x: (srcMouthLeft.x + srcMouthRight.x) / 2,
+    y: (srcMouthLeft.y + srcMouthRight.y) / 2
+  };
+  const srcFaceCenter = {
+    x: (srcEyeCenter.x + srcMouthCenter.x + srcChin.x) / 3,
+    y: (srcEyeCenter.y + srcMouthCenter.y + srcChin.y) / 3
+  };
+  const srcEyeDist = Math.hypot(srcRightEye.x - srcLeftEye.x, srcRightEye.y - srcLeftEye.y);
+  const srcAngle = Math.atan2(srcRightEye.y - srcLeftEye.y, srcRightEye.x - srcLeftEye.x);
+  
+  // Crop with generous padding
+  const srcMinX = Math.min(...srcFaceOval.map(p => p.x));
+  const srcMaxX = Math.max(...srcFaceOval.map(p => p.x));
+  const srcMinY = Math.min(...srcFaceOval.map(p => p.y));
+  const srcMaxY = Math.max(...srcFaceOval.map(p => p.y));
+  const srcWidth = srcMaxX - srcMinX;
+  const srcHeight = srcMaxY - srcMinY;
+  
+  const padding = 0.4;
+  const cropX = Math.max(0, srcMinX - srcWidth * padding);
+  const cropY = Math.max(0, srcMinY - srcHeight * padding);
+  const cropW = Math.min(sourceImg.naturalWidth - cropX, srcWidth * (1 + 2 * padding));
+  const cropH = Math.min(sourceImg.naturalHeight - cropY, srcHeight * (1 + 2 * padding));
+  
+  const srcCropCanvas = document.createElement('canvas');
+  srcCropCanvas.width = cropW;
+  srcCropCanvas.height = cropH;
+  const srcCropCtx = srcCropCanvas.getContext('2d');
+  srcCropCtx.drawImage(sourceImg, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+  
+  cachedSourceData = {
+    dataUrl: sourceFaceDataUrl,
+    landmarks: srcLandmarks,
+    faceCenter: srcFaceCenter,
+    eyeDist: srcEyeDist,
+    angle: srcAngle,
+    cropCanvas: srcCropCanvas,
+    cropX,
+    cropY
+  };
+  
+  return cachedSourceData;
+}
+
+async function performSimpleSwap(sourceFaceDataUrl, targetImageDataUrl, targetOriginalUrl) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const timings = { start: performance.now() };
+      console.log('SWAP_PIPELINE_V23_DEBUG');
+      // Get cached source data and detect target face
+      console.log('StarringYou: Processing faces...');
+      const [sourceData, targetFaceData] = await Promise.all([
+        getCachedSourceData(sourceFaceDataUrl),
+        detectFaceInImage(targetImageDataUrl)
+      ]);
+      timings.detect = performance.now() - timings.start;
+      
+      if (!targetFaceData.success) {
+        console.log('StarringYou: No face in target, skipping');
+        resolve(null);
+        return;
+      }
+      
+      if (!sourceData) {
+        console.log('StarringYou: No face in source, using fallback');
+        resolve(null);
+        return;
+      }
+      
+      console.log('StarringYou: Both faces detected, aligning...');
+      
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const targetImg = new Image();
+      
+      await new Promise(r => { targetImg.onload = r; targetImg.src = targetImageDataUrl; });
+      
+      // Set canvas to target image size
+      canvas.width = targetImg.naturalWidth;
+      canvas.height = targetImg.naturalHeight;
+      
+      // Draw target image first
+      ctx.drawImage(targetImg, 0, 0, canvas.width, canvas.height);
+      
+      // Get target landmarks in pixel coordinates (use original dimensions before downscaling)
+      const tgtWidth = targetFaceData.originalWidth || canvas.width;
+      const tgtHeight = targetFaceData.originalHeight || canvas.height;
+      const tgtLandmarks = targetFaceData.landmarks.map(p => ({
+        x: p.x * tgtWidth,
+        y: p.y * tgtHeight
+      }));
+      
+      const tgtLeftEye = tgtLandmarks[33];
+      const tgtRightEye = tgtLandmarks[263];
+      const tgtMouthLeft = tgtLandmarks[61];
+      const tgtMouthRight = tgtLandmarks[291];
+      const tgtChin = tgtLandmarks[152];
+      
+      const tgtEyeCenter = {
+        x: (tgtLeftEye.x + tgtRightEye.x) / 2,
+        y: (tgtLeftEye.y + tgtRightEye.y) / 2
+      };
+      const tgtMouthCenter = {
+        x: (tgtMouthLeft.x + tgtMouthRight.x) / 2,
+        y: (tgtMouthLeft.y + tgtMouthRight.y) / 2
+      };
+      const tgtFaceCenter = {
+        x: (tgtEyeCenter.x + tgtMouthCenter.x + tgtChin.x) / 3,
+        y: (tgtEyeCenter.y + tgtMouthCenter.y + tgtChin.y) / 3
+      };
+      const tgtEyeDist = Math.hypot(tgtRightEye.x - tgtLeftEye.x, tgtRightEye.y - tgtLeftEye.y);
+      const tgtAngle = Math.atan2(tgtRightEye.y - tgtLeftEye.y, tgtRightEye.x - tgtLeftEye.x);
+      
+      // Least-squares similarity transform from key landmarks
+      const tgtNoseTip = tgtLandmarks[1];
+      const srcNoseTip = sourceData.landmarks[1];
+      const srcMouthLeft = sourceData.landmarks[61];
+      const srcMouthRight = sourceData.landmarks[291];
+      const srcChin = sourceData.landmarks[152];
+      const srcLeftEye = sourceData.landmarks[33];
+      const srcRightEye = sourceData.landmarks[263];
+      
+      // Collect corresponding point pairs (source -> target)
+      const srcPts = [srcLeftEye, srcRightEye, srcNoseTip, srcMouthLeft, srcMouthRight, srcChin];
+      const tgtPts = [tgtLeftEye, tgtRightEye, tgtNoseTip, tgtMouthLeft, tgtMouthRight, tgtChin];
+      
+      // Compute centroids
+      const srcCentroid = srcPts.reduce((acc, p) => ({ x: acc.x + p.x / 6, y: acc.y + p.y / 6 }), { x: 0, y: 0 });
+      const tgtCentroid = tgtPts.reduce((acc, p) => ({ x: acc.x + p.x / 6, y: acc.y + p.y / 6 }), { x: 0, y: 0 });
+      
+      // Center points
+      const srcCentered = srcPts.map(p => ({ x: p.x - srcCentroid.x, y: p.y - srcCentroid.y }));
+      const tgtCentered = tgtPts.map(p => ({ x: p.x - tgtCentroid.x, y: p.y - tgtCentroid.y }));
+      
+      // Compute scale from average distances to centroid
+      const srcScale = Math.sqrt(srcCentered.reduce((sum, p) => sum + p.x * p.x + p.y * p.y, 0) / 6);
+      const tgtScale = Math.sqrt(tgtCentered.reduce((sum, p) => sum + p.x * p.x + p.y * p.y, 0) / 6);
+      const scale = tgtScale / srcScale;
+      const rotation = tgtAngle - sourceData.angle;
+      
+      // Create mask from target face oval, shrunk and feathered
+      let tgtFaceOval = FACE_OVAL_INDICES.map(i => tgtLandmarks[i]);
+      
+      // Lower top edge to just above eyebrows (avoid hairline seam)
+      const tgtBrows = BROW_INDICES.map(i => tgtLandmarks[i]);
+      const browY = Math.min(...tgtBrows.map(p => p.y));
+      const faceHeight = Math.hypot(tgtEyeCenter.x - tgtChin.x, tgtEyeCenter.y - tgtChin.y);
+      
+      // For top-half points, move down to brow line
+      const topHalfCount = Math.floor(tgtFaceOval.length / 2);
+      for (let i = 0; i < topHalfCount; i++) {
+        tgtFaceOval[i].y = Math.max(tgtFaceOval[i].y, browY - 0.15 * faceHeight);
+      }
+      
+      // Calculate centroid
+      const centroid = tgtFaceOval.reduce((acc, p) => ({
+        x: acc.x + p.x / tgtFaceOval.length,
+        y: acc.y + p.y / tgtFaceOval.length
+      }), { x: 0, y: 0 });
+      
+      // Shrink mask 4% toward centroid
+      tgtFaceOval = tgtFaceOval.map(p => ({
+        x: p.x + (centroid.x - p.x) * 0.04,
+        y: p.y + (centroid.y - p.y) * 0.04
+      }));
+      
+      // Calculate mask bbox with padding
+      const maskMinX = Math.max(0, Math.floor(Math.min(...tgtFaceOval.map(p => p.x)) - tgtEyeDist * 0.5));
+      const maskMaxX = Math.min(canvas.width, Math.ceil(Math.max(...tgtFaceOval.map(p => p.x)) + tgtEyeDist * 0.5));
+      const maskMinY = Math.max(0, Math.floor(Math.min(...tgtFaceOval.map(p => p.y)) - tgtEyeDist * 0.5));
+      const maskMaxY = Math.min(canvas.height, Math.ceil(Math.max(...tgtFaceOval.map(p => p.y)) + tgtEyeDist * 0.5));
+      const maskWidth = maskMaxX - maskMinX;
+      const maskHeight = maskMaxY - maskMinY;
+      
+      // Create mask at 1/4 res within bbox only
+      const downscale = 4;
+      const smallMask = document.createElement('canvas');
+      smallMask.width = Math.ceil(maskWidth / downscale);
+      smallMask.height = Math.ceil(maskHeight / downscale);
+      const smallCtx = smallMask.getContext('2d');
+      
+      // Draw polygon mask at 1/4 res (offset by bbox origin)
+      smallCtx.fillStyle = 'rgba(255, 255, 255, 1)';
+      smallCtx.beginPath();
+      const firstPt = tgtFaceOval[0];
+      smallCtx.moveTo((firstPt.x - maskMinX) / downscale, (firstPt.y - maskMinY) / downscale);
+      tgtFaceOval.forEach(p => {
+        smallCtx.lineTo((p.x - maskMinX) / downscale, (p.y - maskMinY) / downscale);
+      });
+      smallCtx.closePath();
+      smallCtx.fill();
+      
+      // Apply box blur at 1/4 res
+      const featherRadius = Math.max(1, Math.round((tgtEyeDist * 0.06) / downscale));
+      const smallMaskData = smallCtx.getImageData(0, 0, smallMask.width, smallMask.height);
+      for (let pass = 0; pass < 3; pass++) {
+        boxBlurImageData(smallMaskData, featherRadius);
+      }
+      smallCtx.putImageData(smallMaskData, 0, 0);
+      
+      // Upscale back into exact bbox on full-res mask canvas
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = canvas.width;
+      maskCanvas.height = canvas.height;
+      const maskCtx = maskCanvas.getContext('2d');
+      maskCtx.imageSmoothingEnabled = true;
+      maskCtx.imageSmoothingQuality = 'high';
+      maskCtx.drawImage(smallMask, 0, 0, smallMask.width, smallMask.height, 
+                        maskMinX, maskMinY, maskWidth, maskHeight);
+      
+      const maskData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+      timings.maskEnd = performance.now();
+      
+      // Color transfer: RGB-based mean/std matching (more robust than LAB)
+      const srcInnerFace = INNER_FACE_INDICES.map(i => sourceData.landmarks[i]);
+      const tgtInnerFace = INNER_FACE_INDICES.map(i => tgtLandmarks[i]);
+      
+      // Clone source ImageData (don't modify cached canvas)
+      const cachedSrcData = sourceData.cropCanvas.getContext('2d').getImageData(
+        0, 0, sourceData.cropCanvas.width, sourceData.cropCanvas.height
+      );
+      const srcData = new ImageData(
+        new Uint8ClampedArray(cachedSrcData.data),
+        cachedSrcData.width,
+        cachedSrcData.height
+      );
+      
+      const tgtData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      
+      // Sample colors from inner face regions
+      const sampleColors = (imageData, landmarks, imgW, imgH, offsetX, offsetY, sampleScale) => {
+        const colors = { r: [], g: [], b: [] };
+        landmarks.forEach(p => {
+          const x = Math.round((p.x - offsetX) * sampleScale);
+          const y = Math.round((p.y - offsetY) * sampleScale);
+          if (x >= 0 && x < imgW && y >= 0 && y < imgH) {
+            const idx = (y * imgW + x) * 4;
+            colors.r.push(imageData.data[idx]);
+            colors.g.push(imageData.data[idx + 1]);
+            colors.b.push(imageData.data[idx + 2]);
+          }
+        });
+        return colors;
+      };
+      
+      const srcSampleScale = 1; // Already in crop coordinates
+      const srcColors = sampleColors(srcData, srcInnerFace, sourceData.cropCanvas.width, sourceData.cropCanvas.height, 
+        sourceData.cropX, sourceData.cropY, srcSampleScale);
+      
+      const tgtColors = sampleColors(tgtData, tgtInnerFace, canvas.width, canvas.height, 0, 0, 1);
+      
+      // Skip color transfer if insufficient samples
+      if (srcColors.r.length > 5 && tgtColors.r.length > 5) {
+        // Compute mean and std per channel
+        const mean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+        const std = (arr, m) => Math.sqrt(arr.reduce((a, b) => a + (b - m) ** 2, 0) / arr.length);
+        
+        const srcMean = { r: mean(srcColors.r), g: mean(srcColors.g), b: mean(srcColors.b) };
+        const srcStd = { r: std(srcColors.r, srcMean.r), g: std(srcColors.g, srcMean.g), b: std(srcColors.b, srcMean.b) };
+        const tgtMean = { r: mean(tgtColors.r), g: mean(tgtColors.g), b: mean(tgtColors.b) };
+        const tgtStd = { r: std(tgtColors.r, tgtMean.r), g: std(tgtColors.g, tgtMean.g), b: std(tgtColors.b, tgtMean.b) };
+        
+        // Apply color transfer with strength factor
+        const strength = 0.7;
+        for (let i = 0; i < srcData.data.length; i += 4) {
+          const r = srcData.data[i];
+          const g = srcData.data[i + 1];
+          const b = srcData.data[i + 2];
+          
+          // Transfer per channel
+          let r2 = ((r - srcMean.r) / (srcStd.r + 1e-6)) * tgtStd.r + tgtMean.r;
+          let g2 = ((g - srcMean.g) / (srcStd.g + 1e-6)) * tgtStd.g + tgtMean.g;
+          let b2 = ((b - srcMean.b) / (srcStd.b + 1e-6)) * tgtStd.b + tgtMean.b;
+          
+          // Blend with original
+          r2 = r + (r2 - r) * strength;
+          g2 = g + (g2 - g) * strength;
+          b2 = b + (b2 - b) * strength;
+          
+          // Clamp
+          srcData.data[i] = Math.max(0, Math.min(255, Math.round(r2)));
+          srcData.data[i + 1] = Math.max(0, Math.min(255, Math.round(g2)));
+          srcData.data[i + 2] = Math.max(0, Math.min(255, Math.round(b2)));
+        }
+      }
+      
+      // Create temp canvas with color-transferred source
+      const srcColorCorrected = document.createElement('canvas');
+      srcColorCorrected.width = srcData.width;
+      srcColorCorrected.height = srcData.height;
+      const srcColorCtx = srcColorCorrected.getContext('2d');
+      srcColorCtx.putImageData(srcData, 0, 0);
+      timings.colorEnd = performance.now();
+      
+      // Draw transformed source to temp canvas (centered on landmark centroids)
+      const warpedCanvas = document.createElement('canvas');
+      warpedCanvas.width = canvas.width;
+      warpedCanvas.height = canvas.height;
+      const warpedCtx = warpedCanvas.getContext('2d');
+      warpedCtx.save();
+      warpedCtx.translate(tgtCentroid.x, tgtCentroid.y);
+      warpedCtx.rotate(rotation);
+      warpedCtx.scale(scale, scale);
+      warpedCtx.translate(-srcCentroid.x, -srcCentroid.y);
+      warpedCtx.drawImage(srcColorCorrected, sourceData.cropX, sourceData.cropY);
+      warpedCtx.restore();
+      timings.warpEnd = performance.now();
+      
+      // Calculate face bounding box (with padding)
+      const faceMinX = Math.max(0, Math.floor(Math.min(...tgtFaceOval.map(p => p.x)) - tgtEyeDist * 0.5));
+      const faceMaxX = Math.min(canvas.width, Math.ceil(Math.max(...tgtFaceOval.map(p => p.x)) + tgtEyeDist * 0.5));
+      const faceMinY = Math.max(0, Math.floor(Math.min(...tgtFaceOval.map(p => p.y)) - tgtEyeDist * 0.5));
+      const faceMaxY = Math.min(canvas.height, Math.ceil(Math.max(...tgtFaceOval.map(p => p.y)) + tgtEyeDist * 0.5));
+      
+      // Manual alpha compositing: multiply mask by source alpha, then blend (bbox only)
+      const warpedData = warpedCtx.getImageData(faceMinX, faceMinY, faceMaxX - faceMinX, faceMaxY - faceMinY);
+      const targetData = ctx.getImageData(faceMinX, faceMinY, faceMaxX - faceMinX, faceMaxY - faceMinY);
+      const maskBboxData = maskCtx.getImageData(faceMinX, faceMinY, faceMaxX - faceMinX, faceMaxY - faceMinY);
+      const resultData = ctx.createImageData(faceMaxX - faceMinX, faceMaxY - faceMinY);
+      
+      for (let i = 0; i < resultData.data.length; i += 4) {
+        // Combine mask alpha with warped source alpha
+        const maskAlpha = maskBboxData.data[i + 3] / 255;
+        const srcAlpha = warpedData.data[i + 3] / 255;
+        const alpha = maskAlpha * srcAlpha;
+        
+        // Blend RGB channels
+        resultData.data[i] = targetData.data[i] * (1 - alpha) + warpedData.data[i] * alpha;
+        resultData.data[i + 1] = targetData.data[i + 1] * (1 - alpha) + warpedData.data[i + 1] * alpha;
+        resultData.data[i + 2] = targetData.data[i + 2] * (1 - alpha) + warpedData.data[i + 2] * alpha;
+        resultData.data[i + 3] = 255; // Opaque
+      }
+      
+      ctx.putImageData(resultData, faceMinX, faceMinY);
+      timings.blendEnd = performance.now();
+      
+      // Debug exports for model-2
+      if (targetOriginalUrl && targetOriginalUrl.includes('model-2')) {
+        // Export intermediate stages
+        const debugTarget = document.createElement('canvas');
+        debugTarget.width = canvas.width;
+        debugTarget.height = canvas.height;
+        const debugCtx = debugTarget.getContext('2d');
+        debugCtx.drawImage(targetImg, 0, 0);
+        
+        console.log('DEBUG_EXPORTS', {
+          target: debugTarget.toDataURL('image/png'),
+          warpedSource: warpedCanvas.toDataURL('image/png'),
+          mask: maskCanvas.toDataURL('image/png'),
+          result: canvas.toDataURL('image/png')
+        });
+      }
+      
+      // Debug mode: draw landmarks
+      if (DEBUG_MODE) {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = 'red';
+        tgtLandmarks.forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.fillStyle = 'lime';
+        [tgtLeftEye, tgtRightEye, tgtMouth].forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+      
+      // Convert to Blob and create object URL (faster than dataURL)
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.9));
+      const blobUrl = URL.createObjectURL(blob);
+      timings.encodeEnd = performance.now();
+      
+      // Calculate breakdown
+      const breakdown = {
+        detect: Math.round(timings.detect),
+        mask: Math.round(timings.maskEnd - timings.start - timings.detect),
+        color: Math.round(timings.colorEnd - timings.maskEnd),
+        warp: Math.round(timings.warpEnd - timings.colorEnd),
+        blend: Math.round(timings.blendEnd - timings.warpEnd),
+        encode: Math.round(timings.encodeEnd - timings.blendEnd),
+        total: Math.round(timings.encodeEnd - timings.start)
+      };
+      console.log(`StarringYou: Timing breakdown (ms): detect=${breakdown.detect} mask=${breakdown.mask} color=${breakdown.color} warp=${breakdown.warp} blend=${breakdown.blend} encode=${breakdown.encode} total=${breakdown.total}`);
+      
+      resolve(blobUrl);
+    } catch (error) {
+      console.error('StarringYou: Face swap error:', error);
+      reject(error);
+    }
+  });
+}
+
+// Apply swapped image to DOM
+function applySwappedImage(img, swappedDataUrl) {
+  const originalSrc = img.src;
+  
+  // Store original
+  img.setAttribute('data-starringyou-original', originalSrc);
+  img.setAttribute('data-starringyou-swapped', swappedDataUrl);
+  
+  // Replace with swapped
+  img.src = swappedDataUrl;
+  
+  // Add toggle badge
+  const wrapper = img.parentElement;
+  if (wrapper?.classList.contains('starringyou-wrapper')) {
+    const badge = createToggleBadge(img, originalSrc);
+    wrapper.appendChild(badge);
+  }
+}
+
+// Hash image URL for caching
+async function hashImageUrl(url) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(url);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
+}
+
+// Save cache to storage
+async function saveSwapCache() {
+  const cacheObj = Object.fromEntries(swapCache);
+  await chrome.storage.local.set({ swapCache: cacheObj });
+}
+
+// Remove all swaps
+function removeAllSwaps() {
+  document.querySelectorAll('[data-starringyou-original]').forEach(img => {
+    const original = img.getAttribute('data-starringyou-original');
+    if (original) {
+      img.src = original;
+    }
+  });
+  
+  document.querySelectorAll('.starringyou-toggle-badge, .starringyou-star-btn').forEach(el => {
+    el.remove();
+  });
+}
+
+// Observe new images (lazy loading)
+function observeNewImages() {
+  const observer = new MutationObserver((mutations) => {
+    if (!extensionEnabled || !enrollmentData) return;
+
+    mutations.forEach(mutation => {
+      mutation.addedNodes.forEach(node => {
+        if (node.nodeName === 'IMG') {
+          if (node.naturalWidth >= 200 && node.naturalHeight >= 200) {
+            processImage(node);
+          }
+        } else if (node.querySelectorAll) {
+          const images = node.querySelectorAll('img');
+          images.forEach(img => {
+            if (img.naturalWidth >= 200 && img.naturalHeight >= 200) {
+              processImage(img);
+            }
+          });
+        }
+      });
+    });
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}

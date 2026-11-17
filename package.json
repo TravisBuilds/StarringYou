@@ -1,0 +1,30 @@
+{
+  "name": "starringyou",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 43123",
+    "build": "tsc && vite build",
+    "build:offscreen": "vite build --config vite.config.offscreen.ts",
+    "build:onboarding": "vite build --config vite.config.onboarding.ts",
+    "build:extension": "npm run build:offscreen && npm run build:onboarding",
+    "preview": "vite preview",
+    "test": "vitest",
+    "e2e": "xvfb-run -a node scripts/e2e.mjs"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.17",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^26.6.6",
+    "jsdom": "^31.0.1",
+    "playwright": "^1.65.1",
+    "serve-handler": "^6.1.8",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.6",
+    "vitest": "^3.0.0"
+  }
+}

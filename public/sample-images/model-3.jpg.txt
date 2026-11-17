@@ -1,0 +1,2 @@
+This is a placeholder. Download a real clothing model image and save as model-3.jpg
+See DOWNLOAD_SAMPLES.md for instructions.

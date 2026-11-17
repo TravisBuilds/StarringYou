@@ -1,0 +1,45 @@
+StarringYou - Image Credits
+============================
+
+Sample Images (public/sample-images/)
+-------------------------------------
+All sample images are from Unsplash and used under the Unsplash License
+(https://unsplash.com/license) which allows free use for any purpose.
+
+model-1.jpg
+  Photo by Aiony Haust on Unsplash
+  Original: https://unsplash.com/photos/3TLl_97HNJo
+  License: Unsplash License (free to use)
+
+model-2.jpg
+  Photo by Ayo Ogunseinde on Unsplash
+  Original: https://unsplash.com/photos/sibVwORYqs0
+  License: Unsplash License (free to use)
+
+model-3.jpg
+  Photo by Christopher Campbell on Unsplash
+  Original: https://unsplash.com/photos/rDEOVtE7vOs
+  License: Unsplash License (free to use)
+
+model-4.jpg
+  Photo by Randalyn Hill on Unsplash
+  Original: https://unsplash.com/photos/U8o1ZYy87Bo
+  License: Unsplash License (free to use)
+
+
+Third-Party Libraries
+---------------------
+- MediaPipe Face Landmarker - Apache License 2.0
+  https://github.com/google/mediapipe
+
+- JSZip - MIT License
+  https://github.com/Stuk/jszip
+
+- Vite - MIT License
+  https://vitejs.dev
+
+- TypeScript - Apache License 2.0
+  https://www.typescriptlang.org
+
+- Vitest - MIT License
+  https://vitest.dev

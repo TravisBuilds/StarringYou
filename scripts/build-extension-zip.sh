@@ -7,7 +7,10 @@ echo "🔨 Building StarringYou extension package..."
 echo "📦 Building offscreen bundle..."
 npm run build:offscreen
 
-# Create zip
+# Remove duplicates from dist AFTER build
+rm -rf extension/dist/mediapipe extension/dist/sample-images
+
+# Create zip (only include offscreen.js from dist, not the whole dist folder)
 echo "📦 Creating extension zip..."
 cd extension
 zip -r ../starringyou-extension.zip \
@@ -18,9 +21,11 @@ zip -r ../starringyou-extension.zip \
   onboarding/ \
   icons/ \
   mediapipe/ \
-  dist/ \
+  dist/offscreen.js \
   -x "*.DS_Store" \
-  -x "*/.*"
+  -x "*/.*" \
+  -x "dist/mediapipe/*" \
+  -x "dist/sample-images/*"
 
 cd ..
 echo "✅ Extension package created: starringyou-extension.zip"

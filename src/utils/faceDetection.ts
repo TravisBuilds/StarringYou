@@ -5,6 +5,8 @@
 import { FaceLandmarker, FilesetResolver, type FaceLandmarkerResult } from '@mediapipe/tasks-vision';
 import type { FaceLandmarks, HeadPose } from '../types';
 
+declare const chrome: any;
+
 let faceLandmarker: FaceLandmarker | null = null;
 let isInitializing = false;
 

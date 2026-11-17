@@ -89,7 +89,7 @@ export class LocalSwapEngine {
   /**
    * Perform Delaunay triangulation on landmarks
    */
-  private delaunayTriangulate(points: Array<{ x: number; y: number }>): number[][] {
+  private delaunayTriangulate(_points: Array<{ x: number; y: number }>): number[][] {
     // Simplified Delaunay - in production would use proper algorithm
     // For now, use face mesh's built-in triangle indices
     // MediaPipe face mesh has 468 landmarks with predefined triangulation

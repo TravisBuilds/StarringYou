@@ -45,12 +45,32 @@ StarringYou is a personal project that will eventually become a Chrome extension
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### Option 1: Chrome Extension (Recommended for Friends & Family)
+
+**Install the extension:**
+1. Download `starringyou-extension.zip` from releases (or from `/cursor/stores/self/`)
+2. Unzip the file
+3. Open Chrome → `chrome://extensions/`
+4. Enable "Developer mode" (top-right toggle)
+5. Click "Load unpacked" → select the unzipped folder
+6. ⭐ StarringYou icon appears in toolbar!
+
+**First use:**
+1. Click the ⭐ icon → "Enroll Face"
+2. Allow camera access and follow enrollment steps
+3. Toggle "Face Swap" to ON
+4. Visit any shopping site and see yourself in the outfits!
+
+📖 **Full extension guide:** See `extension/README.md`
+
+### Option 2: Web App (Development/Testing)
+
+**Prerequisites:**
 - Node.js 18+ and npm
 - A webcam
 - (Optional) API keys for real face swap providers
 
-### Installation
+**Installation:**
 
 ```bash
 # Install dependencies
@@ -96,6 +116,28 @@ Test mode creates a fake video stream from a still image, allowing you to:
 - Verify MediaPipe integration works
 - Demo the UI without camera access
 - Sanity-check enrollment flow logic
+
+---
+
+## 🆕 What's New: Chrome Extension!
+
+StarringYou now includes a **Chrome extension** that automatically swaps faces on shopping sites!
+
+**What it does:**
+- 🎭 Automatically detects product images on any shopping site
+- ⭐ Swaps model faces with your enrolled face
+- 🔄 Toggle between original and swapped with one click
+- 💾 Caches swaps locally for instant replay
+- 🔒 100% private - everything stays on your device
+
+**Current status:** 
+- ✅ Extension structure complete
+- ✅ Enrollment flow working
+- ✅ Auto-swap and manual modes
+- ⏳ Needs real-world Chrome testing
+- ⚠️ Swap quality is basic (simple overlay for now)
+
+**How to install:** See "Option 1" in Quick Start above, or read `extension/README.md`
 
 ---
 

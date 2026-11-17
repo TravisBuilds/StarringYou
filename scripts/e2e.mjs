@@ -101,6 +101,16 @@ async function runE2E() {
     await extensionsPage.close();
     logToFile('✅ Extensions page screenshot saved');
     
+    // Clear swap cache for fresh test via service worker
+    logToFile('🧹 Clearing swap cache...');
+    if (backgroundPages.length > 0) {
+      const sw = backgroundPages[0];
+      await sw.evaluate(() => {
+        return chrome.storage.local.remove('swapCache');
+      });
+      logToFile('✅ Cache cleared');
+    }
+    
     logToFile('🧪 Using TEST MODE - content script will use hardcoded test face');
     
     // Create page and navigate to test fixture with test mode enabled

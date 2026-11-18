@@ -16,9 +16,10 @@ export default defineConfig({
       args: [
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
-        '--use-fake-device-for-media-capture',
+        ...(process.env.FAKE_VIDEO_PATH ? [`--use-file-for-fake-video-capture=${process.env.FAKE_VIDEO_PATH}`] : []),
         '--disable-blink-features=AutomationControlled',
-      ]
+      ],
+      headless: false, // Run headed for fake video to work
     },
     permissions: ['camera', 'microphone'],
   },

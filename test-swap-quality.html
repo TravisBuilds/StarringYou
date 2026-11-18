@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Swap Quality Test</title>
+  <script type="module">
+    import { LocalSwapEngine } from '/src/swap/LocalSwapEngine.ts';
+    import { initializeFaceDetection, detectFaces, estimateHeadPose } from '/src/utils/faceDetection.ts';
+    
+    async function loadImage(url) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = url;
+      });
+    }
+    
+    function imageToImageData(img) {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      return ctx.getImageData(0, 0, canvas.width, canvas.height);
+    }
+    
+    async function testSwap() {
+      console.log('Starting swap quality test...');
+      
+      // Initialize face detection
+      await initializeFaceDetection();
+      console.log('Face detection initialized');
+      
+      // Load test face (use a celebrity face from placeholder)
+      const testFaceUrl = 'https://i.pravatar.cc/500?img=12';
+      const testFaceImg = await loadImage(testFaceUrl);
+      const testFaceData = imageToImageData(testFaceImg);
+      
+      // Detect face and get landmarks
+      const faceResult = detectFaces(testFaceImg, performance.now());
+      if (!faceResult || !faceResult.faceLandmarks || faceResult.faceLandmarks.length === 0) {
+        console.error('No face detected in test image');
+        return;
+      }
+      
+      const landmarks = {
+        landmarks: faceResult.faceLandmarks[0].map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
+        blendshapes: faceResult.faceBlendshapes?.[0]?.categories.map(c => ({
+          categoryName: c.categoryName,
+          score: c.score
+        }))
+      };
+      
+      const pose = estimateHeadPose(landmarks);
+      console.log('Face detected:', pose);
+      
+      const enrolledFrame = {
+        imageData: testFaceData,
+        dataUrl: testFaceImg.src,
+        landmarks,
+        pose,
+        quality: { overallScore: 100, sharpness: 100, brightness: 128, faceSize: 0.25, centering: 0, eyesOpen: true },
+        stepId: 'test',
+        timestamp: Date.now(),
+        yaw: pose.yaw,
+        pitch: pose.pitch
+      };
+      
+      // Test swap on all 4 sample models
+      const sampleModels = [
+        '/sample-images/model-1.jpg',
+        '/sample-images/model-2.jpg',
+        '/sample-images/model-3.jpg',
+        '/sample-images/model-4.jpg'
+      ];
+      
+      const engine = new LocalSwapEngine();
+      const results = document.getElementById('results');
+      
+      for (let i = 0; i < sampleModels.length; i++) {
+        const modelPath = sampleModels[i];
+        console.log(`Testing swap ${i + 1}/4: ${modelPath}`);
+        
+        try {
+          const modelImg = await loadImage(modelPath);
+          const modelData = imageToImageData(modelImg);
+          
+          const swappedData = await engine.swapFaces(enrolledFrame, modelData);
+          
+          // Convert to canvas and save
+          const canvas = document.createElement('canvas');
+          canvas.width = swappedData.width;
+          canvas.height = swappedData.height;
+          const ctx = canvas.getContext('2d');
+          ctx.putImageData(swappedData, 0, 0);
+          
+          // Display result
+          const resultDiv = document.createElement('div');
+          resultDiv.style = 'display: inline-block; margin: 10px; text-align: center;';
+          resultDiv.innerHTML = `<h3>Model ${i + 1}</h3>`;
+          resultDiv.appendChild(canvas);
+          results.appendChild(resultDiv);
+          
+          // Download as PNG
+          canvas.toBlob(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `web-swap-model-${i + 1}.png`;
+            a.click();
+          }, 'image/png');
+          
+          console.log(`✓ Swap ${i + 1} complete`);
+        } catch (error) {
+          console.error(`✗ Swap ${i + 1} failed:`, error);
+          const errorDiv = document.createElement('div');
+          errorDiv.innerHTML = `<h3 style="color: red;">Model ${i + 1} FAILED</h3><p>${error.message}</p>`;
+          results.appendChild(errorDiv);
+        }
+      }
+      
+      console.log('All swaps complete');
+    }
+    
+    window.testSwap = testSwap;
+  </script>
+</head>
+<body>
+  <h1>Swap Quality Test</h1>
+  <button onclick="testSwap()">Run Test</button>
+  <div id="results" style="margin-top: 20px;"></div>
+</body>
+</html>

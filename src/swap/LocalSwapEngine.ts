@@ -6,6 +6,8 @@
 import { FaceLandmarker } from '@mediapipe/tasks-vision';
 import type { CapturedFrame } from '../types';
 
+declare const chrome: any;
+
 interface FaceMeshData {
   landmarks: Array<{ x: number; y: number; z?: number }>;
   boundingBox: { x: number; y: number; width: number; height: number };
@@ -13,13 +15,63 @@ interface FaceMeshData {
 
 export class LocalSwapEngine {
   private faceLandmarker: FaceLandmarker | null = null;
+  private initPromise: Promise<void> | null = null;
+
+  /**
+   * Initialize face landmarker for IMAGE mode (swap operations)
+   */
+  async initialize(): Promise<void> {
+    if (this.faceLandmarker) return;
+    
+    if (this.initPromise) {
+      return this.initPromise;
+    }
+    
+    this.initPromise = (async () => {
+      const { FilesetResolver, FaceLandmarker } = await import('@mediapipe/tasks-vision');
+      
+      // Determine base path for assets (same as enrollment)
+      const isExtension = typeof chrome !== 'undefined' && chrome.runtime?.getURL;
+      const wasmPath = isExtension 
+        ? chrome.runtime.getURL('mediapipe/wasm')
+        : `${import.meta.env.BASE_URL}mediapipe/wasm`;
+      
+      const modelPath = isExtension
+        ? chrome.runtime.getURL('mediapipe/models/face_landmarker.task')
+        : `${import.meta.env.BASE_URL}mediapipe/models/face_landmarker.task`;
+      
+      console.log('Initializing swap face landmarker:', { wasmPath, modelPath });
+      
+      const vision = await FilesetResolver.forVisionTasks(wasmPath);
+      this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: modelPath,
+          delegate: 'GPU'
+        },
+        runningMode: 'IMAGE', // IMAGE mode for swap (not VIDEO)
+        numFaces: 1,
+        minFaceDetectionConfidence: 0.5,
+        minFacePresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+        outputFaceBlendshapes: true,
+        outputFacialTransformationMatrixes: false
+      });
+      
+      console.log('Swap face landmarker initialized');
+    })();
+    
+    return this.initPromise;
+  }
 
   /**
    * Detect face mesh in an image
    */
   async detectFaceMesh(imageData: ImageData): Promise<FaceMeshData | null> {
+    // Lazy initialization
+    await this.initialize();
+    
     if (!this.faceLandmarker) {
-      throw new Error('Face landmarker not initialized');
+      throw new Error('Face landmarker initialization failed');
     }
 
     // Create temporary canvas to hold image for detection

@@ -10,7 +10,7 @@ import type { CapturedFrame } from '../../types';
 export class LocalProvider implements FaceSwapProvider {
   readonly name = 'Local (Free)';
   readonly requiresApiKey = false;
-  private swapEngine: LocalSwapEngine;
+  public swapEngine: LocalSwapEngine; // Public for pose detection access
   private enrolledFrame: CapturedFrame | null = null;
 
   constructor() {

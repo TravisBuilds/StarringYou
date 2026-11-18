@@ -62,7 +62,7 @@ class App {
     });
   }
 
-  private switchView(viewId: string): void {
+  private async switchView(viewId: string): Promise<void> {
     // Hide all views
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -70,6 +70,11 @@ class App {
     // Show selected view
     document.getElementById(`view-${viewId}`)?.classList.add('active');
     document.getElementById(`nav-${viewId}`)?.classList.add('active');
+    
+    // Refresh enrollment status when switching to swap view
+    if (viewId === 'swap') {
+      await this.updateEnrollmentStatus();
+    }
   }
 
   private async setupEnrollmentView(): Promise<void> {
@@ -475,9 +480,21 @@ class App {
     resultEl.style.display = 'none';
 
     try {
-      // Select best frame based on target pose (for now, use best frontal)
-      // TODO: Detect target face pose and select matching enrolled frame
-      const bestFrame = this.selectBestSourceFrame(this.enrollmentData, 0, 0);
+      // Detect target face pose for best frame selection
+      let targetYaw = 0, targetPitch = 0;
+      try {
+        const targetPose = await this.detectTargetFacePose(targetImagePath);
+        if (targetPose) {
+          targetYaw = targetPose.yaw;
+          targetPitch = targetPose.pitch;
+          console.log('Target face pose:', targetPose);
+        }
+      } catch (error) {
+        console.warn('Could not detect target face pose, using frontal:', error);
+      }
+      
+      // Select best frame based on target pose
+      const bestFrame = this.selectBestSourceFrame(this.enrollmentData, targetYaw, targetPitch);
       
       if (!bestFrame) {
         throw new Error('No suitable frame found for swap');
@@ -533,6 +550,56 @@ class App {
    * @param targetPitch Target face pitch (0 for level)
    * @returns Data URL of the best matching frame
    */
+  /**
+   * Detect target face pose using LocalSwapEngine's landmarker
+   */
+  private async detectTargetFacePose(imageUrl: string): Promise<{ yaw: number; pitch: number; roll: number } | null> {
+    const img = await this.loadImage(imageUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    
+    // Use swap engine's landmarker
+    const provider = this.providerManager.getCurrentProvider();
+    if ('swapEngine' in provider) {
+      const engine = (provider as any).swapEngine;
+      const faceMesh = await engine.detectFaceMesh(imageData);
+      if (faceMesh) {
+        // Estimate pose from landmarks
+        const landmarks = faceMesh.landmarks.map((lm: any) => ({ x: lm.x / img.width, y: lm.y / img.height, z: lm.z }));
+        const nose = landmarks[1];
+        const leftEye = landmarks[33];
+        const rightEye = landmarks[263];
+        
+        const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+        const noseOffsetX = nose.x - eyeCenterX;
+        const eyeWidth = Math.abs(rightEye.x - leftEye.x);
+        const yaw = -(noseOffsetX / eyeWidth) * 90;
+        
+        const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+        const noseOffsetY = nose.y - eyeCenterY;
+        const faceHeight = 0.3; // Approximate
+        const pitch = (noseOffsetY / faceHeight) * 60;
+        
+        return { yaw, pitch, roll: 0 };
+      }
+    }
+    return null;
+  }
+
+  private loadImage(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
   private selectBestSourceFrame(
     data: EnrollmentData,
     targetYaw: number,

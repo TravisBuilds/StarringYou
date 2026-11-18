@@ -47,6 +47,8 @@ export class EnrollmentEngine {
   public stepStartTime: number = 0; // Made public for status callback
   private lastPoseTime: number = 0; // Last time we had a valid pose
   private lastValidPose: HeadPose | null = null;
+  private minimumMetTime: number | null = null; // When minimum turn was first achieved
+  private bestTurnYaw: number = 0; // Track best turn achieved in current step
   
   private statusCallback: ((status: EnrollmentStatus) => void) | null = null;
   private completionCallback: ((data: EnrollmentData) => void) | null = null;
@@ -229,10 +231,41 @@ export class EnrollmentEngine {
       };
       
       const pose = estimateHeadPose(landmarks);
+      this.lastValidPose = pose;
       const currentStep = ENROLLMENT_STEPS[this.currentStepIndex];
       
-      // Check if pose matches target
-      const matched = isPoseMatched(pose, currentStep.targetPose, currentStep.tolerances);
+      // Check if pose matches target with special handling for directional turns
+      let matched = false;
+      let encourageMore = false;
+      
+      if (currentStep.requireDirectionalTurn === 'left') {
+        // Left turn: yaw must be positive (>= 12°) and pitch roughly level
+        matched = pose.yaw >= 12 && Math.abs(pose.pitch) < 20;
+        // Track best turn and encourage going further (up to 45°)
+        if (matched) {
+          this.bestTurnYaw = Math.max(this.bestTurnYaw, pose.yaw);
+          if (this.minimumMetTime === null) {
+            this.minimumMetTime = now;
+          }
+          // Encourage more turning if we've met minimum but not reached 45° yet
+          encourageMore = pose.yaw < 45 && (now - this.minimumMetTime) < 1500;
+        }
+      } else if (currentStep.requireDirectionalTurn === 'right') {
+        // Right turn: yaw must be negative (<= -12°) and pitch roughly level
+        matched = pose.yaw <= -12 && Math.abs(pose.pitch) < 20;
+        // Track best turn and encourage going further (up to -45°)
+        if (matched) {
+          this.bestTurnYaw = Math.min(this.bestTurnYaw, pose.yaw);
+          if (this.minimumMetTime === null) {
+            this.minimumMetTime = now;
+          }
+          // Encourage more turning if we've met minimum but not reached -45° yet
+          encourageMore = pose.yaw > -45 && (now - this.minimumMetTime) < 1500;
+        }
+      } else {
+        // Standard pose matching
+        matched = isPoseMatched(pose, currentStep.targetPose, currentStep.tolerances);
+      }
       
       // Check step-specific requirements
       let requirementsMet = matched;
@@ -243,7 +276,14 @@ export class EnrollmentEngine {
         requirementsMet = requirementsMet && isBlinking(result);
       }
       
-      this.emitStatus(pose, true, matched, false);
+      // Update instruction if encouraging more turn
+      if (encourageMore && this.statusCallback) {
+        const modifiedStatus = this.getStatus(pose, true, matched, false);
+        modifiedStatus.instruction += ' — A bit more…';
+        this.statusCallback(modifiedStatus);
+      } else {
+        this.emitStatus(pose, true, matched, false);
+      }
       
       if (requirementsMet) {
         // Start or continue holding
@@ -333,6 +373,8 @@ export class EnrollmentEngine {
     this.allCapturedFrames.push(...this.stepFrames);
     this.stepFrames = [];
     this.holdStartTime = null;
+    this.minimumMetTime = null;
+    this.bestTurnYaw = 0;
     
     // Move to next step
     this.currentStepIndex++;
@@ -403,16 +445,14 @@ export class EnrollmentEngine {
   }
 
   /**
-   * Emit current status
+   * Get current status (for emission or modification)
    */
-  private emitStatus(
+  private getStatus(
     detectedPose: HeadPose | null,
     faceDetected: boolean,
     poseMatched: boolean,
-    faceTooFar?: boolean
-  ): void {
-    if (!this.statusCallback) return;
-    
+    faceTooFar: boolean
+  ): EnrollmentStatus {
     const currentStep = ENROLLMENT_STEPS[this.currentStepIndex] || ENROLLMENT_STEPS[0];
     const progress = this.currentStepIndex / ENROLLMENT_STEPS.length;
     
@@ -422,7 +462,7 @@ export class EnrollmentEngine {
       holdProgress = Math.min(1, holdDuration / HOLD_DURATION_MS);
     }
     
-    this.statusCallback({
+    return {
       state: this.state,
       currentStepIndex: this.currentStepIndex,
       currentStepId: currentStep.id,
@@ -432,8 +472,21 @@ export class EnrollmentEngine {
       detectedPose,
       faceDetected,
       poseMatched,
-      faceTooFar: faceTooFar || false,
+      faceTooFar,
       stepStartTime: this.stepStartTime
-    });
+    };
+  }
+  
+  /**
+   * Emit current status
+   */
+  private emitStatus(
+    detectedPose: HeadPose | null,
+    faceDetected: boolean,
+    poseMatched: boolean,
+    faceTooFar?: boolean
+  ): void {
+    if (!this.statusCallback) return;
+    this.statusCallback(this.getStatus(detectedPose, faceDetected, poseMatched, faceTooFar || false));
   }
 }

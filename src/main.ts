@@ -428,8 +428,9 @@ class App {
     resultEl.style.display = 'none';
 
     try {
-      // Perform swap
-      const sourceFace = this.enrollmentData.bestFrontalFrame.dataUrl;
+      // Select best frame based on target pose (for now, use best frontal)
+      // TODO: Detect target face pose and select matching enrolled frame
+      const sourceFace = this.selectBestSourceFrame(this.enrollmentData, 0, 0);
       const swappedImage = await this.providerManager.swapFace(sourceFace, targetImagePath);
 
       // Display results
@@ -448,6 +449,42 @@ class App {
       loadingEl.style.display = 'none';
       alert(`Swap failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Select the best source frame based on target pose
+   * @param data Enrollment data with all captured frames
+   * @param targetYaw Target face yaw (0 for frontal)
+   * @param targetPitch Target face pitch (0 for level)
+   * @returns Data URL of the best matching frame
+   */
+  private selectBestSourceFrame(
+    data: EnrollmentData,
+    targetYaw: number,
+    targetPitch: number
+  ): string {
+    if (!data.frames || data.frames.length === 0) {
+      return data.bestFrontalFrame?.dataUrl || '';
+    }
+
+    // Find frame with closest pose match
+    let bestFrame = data.bestFrontalFrame;
+    let bestDistance = Infinity;
+
+    for (const frame of data.frames) {
+      // Calculate pose distance (weighted by yaw more than pitch)
+      const yawDist = Math.abs(frame.yaw - targetYaw);
+      const pitchDist = Math.abs(frame.pitch - targetPitch);
+      const distance = yawDist * 2 + pitchDist; // Weight yaw more heavily
+      
+      if (distance < bestDistance && frame.quality.overallScore > 50) {
+        bestDistance = distance;
+        bestFrame = frame;
+      }
+    }
+
+    console.log(`Selected frame with yaw=${bestFrame?.yaw.toFixed(1)}, pitch=${bestFrame?.pitch.toFixed(1)} for target yaw=${targetYaw}, pitch=${targetPitch}`);
+    return bestFrame?.dataUrl || data.bestFrontalFrame?.dataUrl || '';
   }
 
   private setupSettingsView(): void {

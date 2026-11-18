@@ -60,6 +60,7 @@ test('complete enrollment and swap all 4 samples', async ({ page, context }) => 
     console.log(`\nTesting swap ${i + 1}/4...`);
     
     // Click sample
+    const t0 = Date.now();
     await sampleCards[i].click();
 
     // Wait for swap to start
@@ -67,6 +68,8 @@ test('complete enrollment and swap all 4 samples', async ({ page, context }) => 
     
     // Wait for swap to complete
     await page.waitForSelector('#swap-result', { state: 'visible', timeout: 30000 });
+    const swapTime = Date.now() - t0;
+    console.log(`  ⏱ Swap ${i + 1} took ${swapTime}ms`);
     
     // Check for errors
     const resultContent = await page.locator('#swap-result').textContent();

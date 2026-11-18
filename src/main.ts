@@ -207,7 +207,13 @@ class App {
     // Completion
     this.enrollmentEngine!.onComplete(async (data) => {
       this.enrollmentData = data;
-      await saveEnrollment(data);
+      try {
+        await saveEnrollment(data);
+        console.log('Enrollment saved successfully');
+      } catch (error) {
+        console.error('Failed to save enrollment:', error);
+        alert(`Warning: Failed to save enrollment data: ${error}. Data will be lost on page reload.`);
+      }
       this.showReviewScreen(data);
       this.enableSwapView();
     });
@@ -403,7 +409,14 @@ class App {
   }
 
   private async performSwap(targetImagePath: string): Promise<void> {
+    // Check enrollment data, reload from storage if needed
+    if (!this.enrollmentData) {
+      console.log('No enrollment data in memory, checking storage...');
+      this.enrollmentData = await loadEnrollment();
+    }
+    
     if (!this.enrollmentData?.bestFrontalFrame) {
+      console.error('No enrollment data found. Data:', this.enrollmentData);
       alert('Please complete enrollment first!');
       return;
     }

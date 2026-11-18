@@ -16,8 +16,11 @@ export default defineConfig({
       args: [
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
+        '--use-fake-device-for-media-capture',
+        '--disable-blink-features=AutomationControlled',
       ]
-    }
+    },
+    permissions: ['camera', 'microphone'],
   },
 
   projects: [

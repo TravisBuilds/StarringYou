@@ -26,17 +26,19 @@ describe('Enrollment Steps Configuration', () => {
   it('should have proper left pose configuration', () => {
     const left = ENROLLMENT_STEPS.find(s => s.id === 'left');
     expect(left).toBeDefined();
-    expect(left!.targetPose.yaw).toBe(15); // Positive for left turn (mirrored video)
+    expect(left!.targetPose.yaw).toBe(20); // Positive for left turn (mirrored video)
     expect(left!.targetPose.pitch).toBe(0);
     expect(left!.requireEyesOpen).toBe(true);
+    expect(left!.requireDirectionalTurn).toBe('left');
   });
 
   it('should have proper right pose configuration', () => {
     const right = ENROLLMENT_STEPS.find(s => s.id === 'right');
     expect(right).toBeDefined();
-    expect(right!.targetPose.yaw).toBe(-15); // Negative for right turn (mirrored video)
+    expect(right!.targetPose.yaw).toBe(-20); // Negative for right turn (mirrored video)
     expect(right!.targetPose.pitch).toBe(0);
     expect(right!.requireEyesOpen).toBe(true);
+    expect(right!.requireDirectionalTurn).toBe('right');
   });
 
   it('should have proper up pose configuration', () => {
@@ -248,7 +250,7 @@ describe('Step Progression', () => {
   it('should have consistent tolerance ranges', () => {
     ENROLLMENT_STEPS.forEach(step => {
       expect(step.tolerances.yaw).toBeGreaterThan(0);
-      expect(step.tolerances.yaw).toBeLessThanOrEqual(50); // Very forgiving tolerances
+      expect(step.tolerances.yaw).toBeLessThanOrEqual(100); // Very wide for left/right
       
       expect(step.tolerances.pitch).toBeGreaterThan(0);
       expect(step.tolerances.pitch).toBeLessThanOrEqual(50); // Very forgiving tolerances

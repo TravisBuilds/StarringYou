@@ -30,16 +30,18 @@ export const ENROLLMENT_STEPS: EnrollmentStep[] = [
   {
     id: 'left',
     instruction: 'Turn your head to the left',
-    targetPose: { yaw: 15, pitch: 0, roll: 0 }, // Positive yaw for left turn
-    tolerances: E2E_MODE ? { yaw: 50, pitch: 50, roll: 50 } : { yaw: 50, pitch: 25, roll: 45 }, // Accept any significant turn
-    requireEyesOpen: true
+    targetPose: { yaw: 20, pitch: 0, roll: 0 }, // Positive yaw for left turn
+    tolerances: E2E_MODE ? { yaw: 50, pitch: 50, roll: 50 } : { yaw: 100, pitch: 20, roll: 45 },
+    requireEyesOpen: true,
+    requireDirectionalTurn: 'left' // Special handling: must turn left
   },
   {
     id: 'right',
     instruction: 'Turn your head to the right',
-    targetPose: { yaw: -15, pitch: 0, roll: 0 }, // Negative yaw for right turn  
-    tolerances: E2E_MODE ? { yaw: 50, pitch: 50, roll: 50 } : { yaw: 50, pitch: 25, roll: 45 }, // Accept any significant turn
-    requireEyesOpen: true
+    targetPose: { yaw: -20, pitch: 0, roll: 0 }, // Negative yaw for right turn  
+    tolerances: E2E_MODE ? { yaw: 50, pitch: 50, roll: 50 } : { yaw: 100, pitch: 20, roll: 45 },
+    requireEyesOpen: true,
+    requireDirectionalTurn: 'right' // Special handling: must turn right
   },
   {
     id: 'up',

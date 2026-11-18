@@ -20,6 +20,7 @@ export interface EnrollmentStep {
   tolerances: { yaw: number; pitch: number; roll: number };
   requireEyesOpen?: boolean;
   requireBlink?: boolean;
+  requireDirectionalTurn?: 'left' | 'right'; // Require actual turn in direction
 }
 
 export interface FrameQuality {
@@ -39,6 +40,8 @@ export interface CapturedFrame {
   quality: FrameQuality;
   stepId: string;
   timestamp: number;
+  yaw: number; // Store actual yaw for pose-aware swap
+  pitch: number; // Store actual pitch for pose-aware swap
 }
 
 export interface EnrollmentData {

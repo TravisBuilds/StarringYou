@@ -310,7 +310,9 @@ export class EnrollmentEngine {
         pose,
         quality,
         stepId: ENROLLMENT_STEPS[this.currentStepIndex].id,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        yaw: pose.yaw,
+        pitch: pose.pitch
       };
       
       this.stepFrames.push(frame);

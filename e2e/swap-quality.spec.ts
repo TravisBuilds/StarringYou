@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const FAKE_VIDEO_PATH = '/tmp/test-face.y4m';
+const FAKE_VIDEO_PATH = '/cursor/stores/bot/starringyou/e2e-face/webcam-face.y4m';
 const OUTPUT_DIR = '/cursor/stores/bot/starringyou/web-swaps';
 
 test('complete enrollment and swap all 4 samples', async ({ page, context }) => {

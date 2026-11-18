@@ -197,8 +197,8 @@ describe('Pose Matching Logic', () => {
 });
 
 describe('Hold Duration Logic', () => {
-  it('should use 300ms hold duration', () => {
-    expect(HOLD_DURATION_MS).toBe(300); // Short hold for quick enrollment
+  it('should use 800ms hold duration', () => {
+    expect(HOLD_DURATION_MS).toBe(800); // 800ms for quality capture (300ms in E2E mode)
   });
 
   it('should capture multiple frames during hold', () => {

@@ -35,22 +35,57 @@ export async function initStorage(): Promise<void> {
 
 /**
  * Save enrollment data
+ * Note: Strips ImageData from frames since it's not structured-cloneable
+ * and can be reconstructed from dataUrl if needed
  */
 export async function saveEnrollment(data: EnrollmentData): Promise<void> {
   if (!db) await initStorage();
   
+  // Strip ImageData from frames (not structured-cloneable, reconstructable from dataUrl)
+  const storableData = {
+    frames: data.frames.map(frame => ({
+      dataUrl: frame.dataUrl,
+      landmarks: frame.landmarks,
+      pose: frame.pose,
+      quality: frame.quality,
+      stepId: frame.stepId,
+      timestamp: frame.timestamp,
+      yaw: frame.yaw,
+      pitch: frame.pitch
+    })),
+    bestFrontalFrame: data.bestFrontalFrame ? {
+      dataUrl: data.bestFrontalFrame.dataUrl,
+      landmarks: data.bestFrontalFrame.landmarks,
+      pose: data.bestFrontalFrame.pose,
+      quality: data.bestFrontalFrame.quality,
+      stepId: data.bestFrontalFrame.stepId,
+      timestamp: data.bestFrontalFrame.timestamp,
+      yaw: data.bestFrontalFrame.yaw,
+      pitch: data.bestFrontalFrame.pitch
+    } : null,
+    completedAt: data.completedAt
+  };
+  
   return new Promise((resolve, reject) => {
     const transaction = db!.transaction([STORE_NAME], 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
-    const request = store.put({ id: 'current', ...data });
+    const request = store.put({ id: 'current', ...storableData });
     
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      console.log('Enrollment saved to IndexedDB successfully');
+      resolve();
+    };
+    request.onerror = () => {
+      console.error('IndexedDB put error:', request.error);
+      reject(request.error);
+    };
   });
 }
 
 /**
  * Load enrollment data
+ * Note: Loaded frames won't have imageData (stripped during save),
+ * but it can be reconstructed from dataUrl if needed
  */
 export async function loadEnrollment(): Promise<EnrollmentData | null> {
   if (!db) await initStorage();
@@ -64,12 +99,36 @@ export async function loadEnrollment(): Promise<EnrollmentData | null> {
       const result = request.result;
       if (result) {
         const { id, ...data } = result;
+        console.log('Loaded enrollment from IndexedDB:', {
+          frameCount: data.frames?.length || 0,
+          hasBestFrontal: !!data.bestFrontalFrame,
+          completedAt: data.completedAt
+        });
+        
+        // Add placeholder imageData (not needed for swap, uses dataUrl)
+        if (data.frames) {
+          data.frames = data.frames.map((f: any) => ({
+            ...f,
+            imageData: null as any // Placeholder, actual swap uses dataUrl
+          }));
+        }
+        if (data.bestFrontalFrame) {
+          data.bestFrontalFrame = {
+            ...data.bestFrontalFrame,
+            imageData: null as any
+          };
+        }
+        
         resolve(data as EnrollmentData);
       } else {
+        console.log('No enrollment found in IndexedDB');
         resolve(null);
       }
     };
-    request.onerror = () => reject(request.error);
+    request.onerror = () => {
+      console.error('IndexedDB get error:', request.error);
+      reject(request.error);
+    };
   });
 }
 

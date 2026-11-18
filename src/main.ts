@@ -352,9 +352,17 @@ class App {
     }
   }
 
-  private setupSwapView(): void {
+  private async setupSwapView(): Promise<void> {
     const sampleGrid = document.getElementById('sample-image-grid');
     if (!sampleGrid) return;
+
+    // Add enrollment status indicator
+    const statusEl = document.createElement('div');
+    statusEl.id = 'enrollment-status';
+    statusEl.className = 'enrollment-status';
+    sampleGrid.parentElement!.insertBefore(statusEl, sampleGrid);
+    
+    await this.updateEnrollmentStatus();
 
     // Create sample image cards
     SAMPLE_IMAGES.forEach(sample => {
@@ -408,6 +416,33 @@ class App {
     });
   }
 
+  private async updateEnrollmentStatus(): Promise<void> {
+    const statusEl = document.getElementById('enrollment-status');
+    if (!statusEl) return;
+    
+    // Check enrollment data
+    if (!this.enrollmentData) {
+      this.enrollmentData = await loadEnrollment();
+    }
+    
+    if (!this.enrollmentData) {
+      statusEl.className = 'enrollment-status error';
+      statusEl.innerHTML = '⚠️ No enrollment found. Please complete enrollment first.';
+    } else if (!this.enrollmentData.frames || this.enrollmentData.frames.length === 0) {
+      statusEl.className = 'enrollment-status error';
+      statusEl.innerHTML = '⚠️ Enrollment incomplete: no frames captured.';
+    } else {
+      const usableFrames = this.enrollmentData.frames.filter(f => f.quality.overallScore > 50).length;
+      if (usableFrames === 0) {
+        statusEl.className = 'enrollment-status error';
+        statusEl.innerHTML = `⚠️ No usable frames (all quality scores too low). Please re-enroll.`;
+      } else {
+        statusEl.className = 'enrollment-status success';
+        statusEl.innerHTML = `✅ Enrolled (${usableFrames} usable frame${usableFrames !== 1 ? 's' : ''})`;
+      }
+    }
+  }
+
   private async performSwap(targetImagePath: string): Promise<void> {
     // Check enrollment data, reload from storage if needed
     if (!this.enrollmentData) {
@@ -415,9 +450,19 @@ class App {
       this.enrollmentData = await loadEnrollment();
     }
     
-    if (!this.enrollmentData?.bestFrontalFrame) {
-      console.error('No enrollment data found. Data:', this.enrollmentData);
-      alert('Please complete enrollment first!');
+    if (!this.enrollmentData) {
+      await this.updateEnrollmentStatus();
+      return;
+    }
+    
+    if (!this.enrollmentData.frames || this.enrollmentData.frames.length === 0) {
+      await this.updateEnrollmentStatus();
+      return;
+    }
+    
+    const usableFrames = this.enrollmentData.frames.filter(f => f.quality.overallScore > 50);
+    if (usableFrames.length === 0) {
+      await this.updateEnrollmentStatus();
       return;
     }
 

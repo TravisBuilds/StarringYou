@@ -66,6 +66,9 @@ export const ENROLLMENT_STEPS: EnrollmentStep[] = [
   }
 ];
 
-export const HOLD_DURATION_MS = E2E_MODE ? 300 : 300; // Very short hold - just a few frames
-export const CAPTURE_INTERVAL_MS = 100; // How often to evaluate frames while holding
+export const HOLD_DURATION_MS = E2E_MODE ? 300 : 800; // Hold each pose
+export const STEP_COMPLETE_DELAY_MS = 600; // "Got it" confirmation delay
+export const CAPTURE_INTERVAL_MS = 150; // How often to evaluate frames while holding
 export const MAX_FRAMES_PER_STEP = 5; // Keep best N frames per step
+export const MIN_SHARPNESS_THRESHOLD = 30; // Reject blurry frames
+export const TARGET_FRAMES_PER_STEP = E2E_MODE ? 1 : 3; // Minimum sharp frames per step

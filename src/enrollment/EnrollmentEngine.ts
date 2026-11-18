@@ -68,14 +68,26 @@ export class EnrollmentEngine {
       if (testStream) {
         this.stream = testStream;
       } else {
-        // Request camera access
-        this.stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            facingMode: 'user'
+        // Request camera access with fallback constraints
+        try {
+          this.stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: 'user'
+            }
+          });
+        } catch (constraintError: any) {
+          // Fallback to simpler constraints if detailed ones fail
+          if (constraintError.name === 'OverconstrainedError') {
+            console.warn('Falling back to basic video constraints');
+            this.stream = await navigator.mediaDevices.getUserMedia({
+              video: true
+            });
+          } else {
+            throw constraintError;
           }
-        });
+        }
       }
       
       this.videoElement.srcObject = this.stream;
@@ -83,8 +95,22 @@ export class EnrollmentEngine {
       
       this.setState('ready');
     } catch (error) {
-      this.setState('error', `Failed to initialize: ${error}`);
+      const errorMessage = this.formatError(error);
+      console.error('Initialization failed:', error);
+      this.setState('error', errorMessage);
       throw error;
+    }
+  }
+
+  private formatError(error: unknown): string {
+    if (error instanceof DOMException) {
+      return `${error.name}: ${error.message}`;
+    } else if (error instanceof Error) {
+      return `${error.name}: ${error.message}`;
+    } else if (typeof error === 'string') {
+      return error;
+    } else {
+      return String(error);
     }
   }
 

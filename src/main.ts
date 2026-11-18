@@ -81,24 +81,76 @@ class App {
 
     this.enrollmentEngine = new EnrollmentEngine();
 
-    // Check for test mode
-    if (isTestModeEnabled()) {
-      showTestModeIndicator();
-      instructionText.textContent = 'Test mode: initializing with sample image...';
-    }
+    const initializeCamera = async () => {
+      // Check for test mode
+      if (isTestModeEnabled()) {
+        showTestModeIndicator();
+        instructionText.textContent = 'Test mode: initializing with sample image...';
+      } else {
+        instructionText.textContent = 'Initializing camera...';
+      }
 
-    // Initialize engine (will use test stream if in test mode)
-    try {
-      await this.enrollmentEngine.initialize(video, canvas);
-      startBtn.style.display = 'inline-block';
-      const modeText = isTestModeEnabled() ? ' (Test Mode)' : '';
-      instructionText.textContent = `Ready to begin! Click Start to enroll your face.${modeText}`;
-    } catch (error: any) {
-      instructionText.textContent = `Error: ${error.message}. Please allow camera access.`;
-    }
+      startBtn.style.display = 'none';
+      restartBtn.style.display = 'none';
 
+      // Initialize engine (will use test stream if in test mode)
+      try {
+        await this.enrollmentEngine!.initialize(video, canvas);
+        startBtn.style.display = 'inline-block';
+        const modeText = isTestModeEnabled() ? ' (Test Mode)' : '';
+        instructionText.textContent = `Ready to begin! Click Start to enroll your face.${modeText}`;
+      } catch (error: any) {
+        console.error('Camera initialization error:', error);
+        const errorMessage = this.getErrorMessage(error);
+        instructionText.innerHTML = errorMessage + '<br><button id="retry-camera" class="btn btn-secondary" style="margin-top: 1rem;">Retry</button>';
+        
+        // Add retry button handler
+        setTimeout(() => {
+          document.getElementById('retry-camera')?.addEventListener('click', () => {
+            initializeCamera();
+          });
+        }, 0);
+      }
+    };
+
+    await initializeCamera();
+    this.setupEnrollmentHandlers(instructionText, startBtn, restartBtn);
+
+  }
+
+  private getErrorMessage(error: any): string {
+    const errorName = error?.name || '';
+    const errorMsg = error?.message || String(error);
+    
+    console.log('Error details:', { name: errorName, message: errorMsg, error });
+
+    if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+      return `<strong>Camera permission denied</strong><br>
+        On macOS: Go to System Settings → Privacy & Security → Camera → Enable for Chrome<br>
+        Then refresh this page.`;
+    } else if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
+      return `<strong>Camera in use</strong><br>
+        The camera is being used by another application. Close other apps using the camera and try again.`;
+    } else if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+      return `<strong>No camera found</strong><br>
+        Please connect a webcam and try again.`;
+    } else if (errorMsg.includes('MediaPipe') || errorMsg.includes('model') || errorMsg.includes('wasm')) {
+      return `<strong>Failed to load face detection models</strong><br>
+        ${errorName}: ${errorMsg}<br>
+        This may be a temporary network issue. Please try again.`;
+    } else {
+      return `<strong>Error initializing camera</strong><br>
+        ${errorName ? errorName + ': ' : ''}${errorMsg}`;
+    }
+  }
+
+  private setupEnrollmentHandlers(
+    instructionText: HTMLParagraphElement,
+    startBtn: HTMLButtonElement,
+    restartBtn: HTMLButtonElement
+  ): void {
     // Status updates
-    this.enrollmentEngine.onStatusUpdate(status => {
+    this.enrollmentEngine!.onStatusUpdate(status => {
       instructionText.textContent = status.instruction;
       
       // Update progress arc
@@ -109,7 +161,7 @@ class App {
     });
 
     // Completion
-    this.enrollmentEngine.onComplete(async (data) => {
+    this.enrollmentEngine!.onComplete(async (data) => {
       this.enrollmentData = data;
       await saveEnrollment(data);
       this.showReviewScreen(data);

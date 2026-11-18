@@ -31,12 +31,13 @@ export async function initializeFaceDetection(): Promise<void> {
     
     const wasmPath = isExtension 
       ? chrome.runtime.getURL('mediapipe/wasm')
-      : '/mediapipe/wasm';
+      : `${import.meta.env.BASE_URL}mediapipe/wasm`;
     
     const modelPath = isExtension
       ? chrome.runtime.getURL('mediapipe/models/face_landmarker.task')
-      : '/mediapipe/models/face_landmarker.task';
+      : `${import.meta.env.BASE_URL}mediapipe/models/face_landmarker.task`;
     
+    console.log('Loading MediaPipe from:', { wasmPath, modelPath });
     const vision = await FilesetResolver.forVisionTasks(wasmPath);
     
     faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
@@ -49,6 +50,10 @@ export async function initializeFaceDetection(): Promise<void> {
       runningMode: 'VIDEO',
       numFaces: 1
     });
+    console.log('MediaPipe initialized successfully');
+  } catch (error) {
+    console.error('MediaPipe initialization failed:', error);
+    throw error;
   } finally {
     isInitializing = false;
   }

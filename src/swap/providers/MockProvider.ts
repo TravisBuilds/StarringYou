@@ -4,17 +4,17 @@
  */
 
 import type { FaceSwapProvider } from '../../types';
-import { LocalSwapEngine } from '../LocalSwapEngine';
+import { V2SwapEngine } from '../V2SwapEngine';
 import type { CapturedFrame } from '../../types';
 
 export class LocalProvider implements FaceSwapProvider {
   readonly name = 'Local (Free)';
   readonly requiresApiKey = false;
-  public swapEngine: LocalSwapEngine; // Public for pose detection access
+  public swapEngine: V2SwapEngine; // Public for pose detection access
   private enrolledFrame: CapturedFrame | null = null;
 
   constructor() {
-    this.swapEngine = new LocalSwapEngine();
+    this.swapEngine = new V2SwapEngine();
   }
 
   isConfigured(): boolean {

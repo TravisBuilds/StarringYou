@@ -551,7 +551,7 @@ class App {
    * @returns Data URL of the best matching frame
    */
   /**
-   * Detect target face pose using LocalSwapEngine's landmarker
+   * Detect target face pose using V2SwapEngine's landmarker
    */
   private async detectTargetFacePose(imageUrl: string): Promise<{ yaw: number; pitch: number; roll: number } | null> {
     const img = await this.loadImage(imageUrl);
@@ -562,28 +562,30 @@ class App {
     ctx.drawImage(img, 0, 0);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     
-    // Use swap engine's landmarker
+    // Use V2 swap engine's detector
     const provider = this.providerManager.getCurrentProvider();
     if ('swapEngine' in provider) {
       const engine = (provider as any).swapEngine;
-      const faceMesh = await engine.detectFaceMesh(imageData);
-      if (faceMesh) {
-        // Estimate pose from landmarks
-        const landmarks = faceMesh.landmarks.map((lm: any) => ({ x: lm.x / img.width, y: lm.y / img.height, z: lm.z }));
+      const faceDetection = await engine.detectFace(imageData);
+      if (faceDetection) {
+        const landmarks = faceDetection.landmarks;
         const nose = landmarks[1];
         const leftEye = landmarks[33];
         const rightEye = landmarks[263];
         
+        // Calculate yaw from nose offset (negated for mirrored coordinates)
         const eyeCenterX = (leftEye.x + rightEye.x) / 2;
         const noseOffsetX = nose.x - eyeCenterX;
         const eyeWidth = Math.abs(rightEye.x - leftEye.x);
         const yaw = -(noseOffsetX / eyeWidth) * 90;
         
+        // Calculate pitch from vertical position
         const eyeCenterY = (leftEye.y + rightEye.y) / 2;
         const noseOffsetY = nose.y - eyeCenterY;
-        const faceHeight = 0.3; // Approximate
+        const faceHeight = faceDetection.bbox.height;
         const pitch = (noseOffsetY / faceHeight) * 60;
         
+        console.log(`Target face pose detected: yaw=${yaw.toFixed(1)}°, pitch=${pitch.toFixed(1)}°`);
         return { yaw, pitch, roll: 0 };
       }
     }

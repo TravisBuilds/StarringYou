@@ -27,6 +27,8 @@ export interface EnrollmentStatus {
   detectedPose: HeadPose | null;
   faceDetected: boolean;
   poseMatched: boolean;
+  faceTooFar?: boolean; // Face is turned too far and lost
+  stepStartTime?: number; // When this step started
   errorMessage?: string;
 }
 
@@ -42,6 +44,9 @@ export class EnrollmentEngine {
   private holdStartTime: number | null = null;
   private lastCaptureTime = 0;
   private stepFrames: CapturedFrame[] = [];
+  public stepStartTime: number = 0; // Made public for status callback
+  private lastPoseTime: number = 0; // Last time we had a valid pose
+  private lastValidPose: HeadPose | null = null;
   
   private statusCallback: ((status: EnrollmentStatus) => void) | null = null;
   private completionCallback: ((data: EnrollmentData) => void) | null = null;
@@ -124,10 +129,11 @@ export class EnrollmentEngine {
     
     this.currentStepIndex = 0;
     this.allCapturedFrames = [];
-    this.holdStartTime = null;
-    this.stepFrames = [];
-    
-    this.setState('running');
+        this.holdStartTime = null;
+        this.stepFrames = [];
+        this.stepStartTime = performance.now();
+        
+        this.setState('running');
     this.processFrame();
   }
 
@@ -190,20 +196,28 @@ export class EnrollmentEngine {
       const result = detectFaces(video, now);
       
       if (!result || !result.faceLandmarks || result.faceLandmarks.length === 0) {
-        // No face detected
-        this.emitStatus(null, false, false);
-        this.holdStartTime = null;
+        // No face detected - only reset hold if we've been lost for >500ms
+        const timeSincePose = now - this.lastPoseTime;
+        const faceTooFar = timeSincePose > 500;
+        
+        if (faceTooFar) {
+          this.holdStartTime = null;
+        }
+        
+        this.emitStatus(this.lastValidPose, false, false, faceTooFar);
         this.animationFrameId = requestAnimationFrame(this.processFrame);
         return;
       }
       
       if (result.faceLandmarks.length > 1) {
         // Multiple faces
-        this.emitStatus(null, false, false);
+        this.emitStatus(null, false, false, false);
         this.holdStartTime = null;
         this.animationFrameId = requestAnimationFrame(this.processFrame);
         return;
       }
+      
+      this.lastPoseTime = now;
       
       // Extract landmarks and pose
       const landmarks: FaceLandmarks = {
@@ -229,7 +243,7 @@ export class EnrollmentEngine {
         requirementsMet = requirementsMet && isBlinking(result);
       }
       
-      this.emitStatus(pose, true, matched);
+      this.emitStatus(pose, true, matched, false);
       
       if (requirementsMet) {
         // Start or continue holding
@@ -320,12 +334,21 @@ export class EnrollmentEngine {
     
     // Move to next step
     this.currentStepIndex++;
+    this.stepStartTime = performance.now();
     
     if (this.currentStepIndex >= ENROLLMENT_STEPS.length) {
       this.completeEnrollment();
     } else {
-      this.emitStatus(null, false, false);
+      this.emitStatus(null, false, false, false);
     }
+  }
+  
+  /**
+   * Skip current step (for users who get stuck)
+   */
+  skipStep(): void {
+    console.log('Skipping step:', this.currentStepIndex);
+    this.advanceStep();
   }
 
   /**
@@ -358,7 +381,23 @@ export class EnrollmentEngine {
    */
   private setState(state: EnrollmentState, errorMessage?: string): void {
     this.state = state;
-    this.emitStatus(null, false, false, errorMessage);
+    // Don't emit status for state changes, errorMessage is handled separately
+    if (errorMessage && this.statusCallback) {
+      this.statusCallback({
+        state: this.state,
+        currentStepIndex: this.currentStepIndex,
+        currentStepId: ENROLLMENT_STEPS[this.currentStepIndex]?.id || 'unknown',
+        instruction: errorMessage,
+        progress: 0,
+        holdProgress: 0,
+        detectedPose: null,
+        faceDetected: false,
+        poseMatched: false,
+        faceTooFar: false,
+        stepStartTime: this.stepStartTime,
+        errorMessage
+      });
+    }
   }
 
   /**
@@ -368,7 +407,7 @@ export class EnrollmentEngine {
     detectedPose: HeadPose | null,
     faceDetected: boolean,
     poseMatched: boolean,
-    errorMessage?: string
+    faceTooFar?: boolean
   ): void {
     if (!this.statusCallback) return;
     
@@ -391,7 +430,8 @@ export class EnrollmentEngine {
       detectedPose,
       faceDetected,
       poseMatched,
-      errorMessage
+      faceTooFar: faceTooFar || false,
+      stepStartTime: this.stepStartTime
     });
   }
 }

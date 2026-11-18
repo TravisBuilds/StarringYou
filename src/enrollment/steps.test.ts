@@ -26,7 +26,7 @@ describe('Enrollment Steps Configuration', () => {
   it('should have proper left pose configuration', () => {
     const left = ENROLLMENT_STEPS.find(s => s.id === 'left');
     expect(left).toBeDefined();
-    expect(left!.targetPose.yaw).toBe(-35);
+    expect(left!.targetPose.yaw).toBe(15); // Positive for left turn (mirrored video)
     expect(left!.targetPose.pitch).toBe(0);
     expect(left!.requireEyesOpen).toBe(true);
   });
@@ -34,7 +34,7 @@ describe('Enrollment Steps Configuration', () => {
   it('should have proper right pose configuration', () => {
     const right = ENROLLMENT_STEPS.find(s => s.id === 'right');
     expect(right).toBeDefined();
-    expect(right!.targetPose.yaw).toBe(35);
+    expect(right!.targetPose.yaw).toBe(-15); // Negative for right turn (mirrored video)
     expect(right!.targetPose.pitch).toBe(0);
     expect(right!.requireEyesOpen).toBe(true);
   });
@@ -42,14 +42,14 @@ describe('Enrollment Steps Configuration', () => {
   it('should have proper up pose configuration', () => {
     const up = ENROLLMENT_STEPS.find(s => s.id === 'up');
     expect(up).toBeDefined();
-    expect(up!.targetPose.pitch).toBe(-20);
+    expect(up!.targetPose.pitch).toBe(-10); // Reduced for easier completion
     expect(up!.requireEyesOpen).toBe(true);
   });
 
   it('should have proper down pose configuration', () => {
     const down = ENROLLMENT_STEPS.find(s => s.id === 'down');
     expect(down).toBeDefined();
-    expect(down!.targetPose.pitch).toBe(20);
+    expect(down!.targetPose.pitch).toBe(10); // Reduced for easier completion
     expect(down!.requireEyesOpen).toBe(true);
   });
 
@@ -195,8 +195,8 @@ describe('Pose Matching Logic', () => {
 });
 
 describe('Hold Duration Logic', () => {
-  it('should use 800ms hold duration', () => {
-    expect(HOLD_DURATION_MS).toBe(800);
+  it('should use 300ms hold duration', () => {
+    expect(HOLD_DURATION_MS).toBe(300); // Short hold for quick enrollment
   });
 
   it('should capture multiple frames during hold', () => {
@@ -248,13 +248,13 @@ describe('Step Progression', () => {
   it('should have consistent tolerance ranges', () => {
     ENROLLMENT_STEPS.forEach(step => {
       expect(step.tolerances.yaw).toBeGreaterThan(0);
-      expect(step.tolerances.yaw).toBeLessThanOrEqual(20);
+      expect(step.tolerances.yaw).toBeLessThanOrEqual(50); // Very forgiving tolerances
       
       expect(step.tolerances.pitch).toBeGreaterThan(0);
-      expect(step.tolerances.pitch).toBeLessThanOrEqual(20);
+      expect(step.tolerances.pitch).toBeLessThanOrEqual(50); // Very forgiving tolerances
       
       expect(step.tolerances.roll).toBeGreaterThan(0);
-      expect(step.tolerances.roll).toBeLessThanOrEqual(20);
+      expect(step.tolerances.roll).toBeLessThanOrEqual(50); // Very forgiving
     });
   });
 });

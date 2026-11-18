@@ -85,25 +85,49 @@ export function estimateHeadPose(landmarks: FaceLandmarks): HeadPose {
   const leftEye = pts[33]; // Left eye outer corner
   const rightEye = pts[263]; // Right eye outer corner
   const chin = pts[152]; // Chin
+  const forehead = pts[10]; // Forehead
   
-  // Calculate yaw (left-right rotation) from eye positions
-  const eyeDx = rightEye.x - leftEye.x;
+  // Calculate yaw (left-right rotation) from nose position relative to eye center
+  // When face turns right, nose moves right relative to eyes
+  const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+  const noseOffsetX = noseTip.x - eyeCenterX;
+  const eyeWidth = Math.abs(rightEye.x - leftEye.x);
+  
+  // Normalize by eye width and scale to degrees
+  // Negative offset = face turned left (nose to left of center)
+  // Positive offset = face turned right (nose to right of center)
+  // BUT video is mirrored! So we negate: user's left = positive yaw, user's right = negative yaw
+  let yaw = -(noseOffsetX / eyeWidth) * 90;
+  
+  // Calculate pitch (up-down rotation) from nose position relative to face center
+  const foreheadToChin = Math.abs(chin.y - forehead.y);
+  const noseCenterY = (forehead.y + chin.y) / 2;
+  const noseOffsetY = noseTip.y - noseCenterY;
+  const pitch = (noseOffsetY / foreheadToChin) * 80;
+  
+  // Calculate roll (tilt) from eye line angle
   const eyeDy = rightEye.y - leftEye.y;
-  const yaw = Math.atan2(eyeDy, eyeDx) * (180 / Math.PI);
+  const eyeDx = rightEye.x - leftEye.x;
+  const roll = Math.atan2(eyeDy, eyeDx) * (180 / Math.PI);
   
-  // Calculate pitch (up-down rotation) from nose-to-chin distance
-  const faceHeight = Math.abs(noseTip.y - chin.y);
-  const expectedHeight = 0.15; // Normalized face height when looking straight
-  const pitch = (expectedHeight - faceHeight) * 200 - 10; // Rough approximation
-  
-  // Calculate roll (tilt) from eye horizontal alignment
-  const roll = -yaw; // Simplified - in reality would use more landmarks
-  
-  return {
-    yaw: Math.max(-90, Math.min(90, yaw * 2)), // Scale and clamp
+  const result = {
+    yaw: Math.max(-90, Math.min(90, yaw)),
     pitch: Math.max(-45, Math.min(45, pitch)),
-    roll: Math.max(-30, Math.min(30, roll))
+    roll: Math.max(-45, Math.min(45, roll))
   };
+  
+  // Debug logging
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location?.search || '').get('debug') === '1') {
+    console.log('Pose:', { 
+      yaw: result.yaw.toFixed(1), 
+      pitch: result.pitch.toFixed(1),
+      roll: result.roll.toFixed(1),
+      noseOffsetX: noseOffsetX.toFixed(3),
+      eyeWidth: eyeWidth.toFixed(3)
+    });
+  }
+  
+  return result;
 }
 
 /**
@@ -123,7 +147,7 @@ export function areEyesOpen(result: FaceLandmarkerResult): boolean {
 }
 
 /**
- * Check if user is blinking
+ * Check if user is blinking (more forgiving - just need one eye or partial blink)
  */
 export function isBlinking(result: FaceLandmarkerResult): boolean {
   if (!result.faceBlendshapes || result.faceBlendshapes.length === 0) {
@@ -134,8 +158,8 @@ export function isBlinking(result: FaceLandmarkerResult): boolean {
   const eyeBlinkLeft = blendshapes.find(b => b.categoryName === 'eyeBlinkLeft')?.score || 0;
   const eyeBlinkRight = blendshapes.find(b => b.categoryName === 'eyeBlinkRight')?.score || 0;
   
-  // Blinking if both eyes have high blink score (> 0.7)
-  return eyeBlinkLeft > 0.7 && eyeBlinkRight > 0.7;
+  // Blinking if at least one eye has moderate blink score (> 0.5) - very forgiving
+  return eyeBlinkLeft > 0.5 || eyeBlinkRight > 0.5;
 }
 
 /**

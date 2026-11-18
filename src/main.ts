@@ -149,15 +149,59 @@ class App {
     startBtn: HTMLButtonElement,
     restartBtn: HTMLButtonElement
   ): void {
+    let skipBtn: HTMLButtonElement | null = null;
+    let debugDisplay: HTMLDivElement | null = null;
+    
     // Status updates
     this.enrollmentEngine!.onStatusUpdate(status => {
-      instructionText.textContent = status.instruction;
+      let instruction = status.instruction;
+      
+      // Add guidance for face lost
+      if (!status.faceDetected && status.faceTooFar) {
+        instruction += ' — Not so far, turn back a little';
+      } else if (!status.faceDetected && !status.faceTooFar) {
+        instruction += ' — Looking for your face...';
+      }
+      
+      instructionText.textContent = instruction;
       
       // Update progress arc
       this.updateProgressArc(status.progress, status.holdProgress);
       
       // Update step indicators
       this.updateStepIndicators(status.currentStepIndex);
+      
+      // Show/update skip button after 6 seconds on a step
+      const timeOnStep = status.stepStartTime ? performance.now() - status.stepStartTime : 0;
+      if (timeOnStep > 6000 && !skipBtn) {
+        skipBtn = document.createElement('button');
+        skipBtn.textContent = 'Skip this step';
+        skipBtn.className = 'btn btn-secondary';
+        skipBtn.style.marginTop = '0.5rem';
+        skipBtn.onclick = () => {
+          this.enrollmentEngine?.skipStep();
+          skipBtn?.remove();
+          skipBtn = null;
+        };
+        document.querySelector('.instruction-panel')?.appendChild(skipBtn);
+      } else if (timeOnStep <= 1000 && skipBtn) {
+        skipBtn.remove();
+        skipBtn = null;
+      }
+      
+      // Debug display
+      if (new URLSearchParams(window.location.search).get('debug') === '1') {
+        if (!debugDisplay) {
+          debugDisplay = document.createElement('div');
+          debugDisplay.style.cssText = 'position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.7);color:#0f0;padding:8px;font-family:monospace;font-size:12px;border-radius:4px;';
+          document.querySelector('.camera-wrapper')?.appendChild(debugDisplay);
+        }
+        if (status.detectedPose) {
+          debugDisplay.textContent = `Yaw: ${status.detectedPose.yaw.toFixed(1)}° | Pitch: ${status.detectedPose.pitch.toFixed(1)}° | Matched: ${status.poseMatched}`;
+        } else {
+          debugDisplay.textContent = 'No face';
+        }
+      }
     });
 
     // Completion

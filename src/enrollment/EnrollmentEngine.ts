@@ -12,7 +12,7 @@ import {
   isPoseMatched
 } from '../utils/faceDetection';
 import { evaluateFrameQuality, meetsQualityThreshold } from '../utils/qualityScoring';
-import { ENROLLMENT_STEPS, HOLD_DURATION_MS, CAPTURE_INTERVAL_MS, MAX_FRAMES_PER_STEP } from './steps';
+import { ENROLLMENT_STEPS, HOLD_DURATION_MS, STEP_COMPLETE_DELAY_MS, CAPTURE_INTERVAL_MS, MAX_FRAMES_PER_STEP, MIN_SHARPNESS_THRESHOLD, TARGET_FRAMES_PER_STEP } from './steps';
 import { getTestStream } from '../utils/testMode';
 
 export type EnrollmentState = 'idle' | 'initializing' | 'ready' | 'running' | 'completed' | 'error';
@@ -41,6 +41,7 @@ export class EnrollmentEngine {
   private animationFrameId: number | null = null;
   
   private allCapturedFrames: CapturedFrame[] = [];
+  private stepFrameCounts: Map<string, number> = new Map();
   private holdStartTime: number | null = null;
   private lastCaptureTime = 0;
   private stepFrames: CapturedFrame[] = [];
@@ -49,6 +50,9 @@ export class EnrollmentEngine {
   private lastValidPose: HeadPose | null = null;
   private minimumMetTime: number | null = null; // When minimum turn was first achieved
   private bestTurnYaw: number = 0; // Track best turn achieved in current step
+  private countdownSeconds = 3;
+  private isStepComplete = false;
+  private stepCompleteTime: number | null = null;
   
   private statusCallback: ((status: EnrollmentStatus) => void) | null = null;
   private completionCallback: ((data: EnrollmentData) => void) | null = null;
@@ -129,13 +133,17 @@ export class EnrollmentEngine {
       throw new Error('Engine not ready');
     }
     
-    this.currentStepIndex = 0;
+    this.currentStepIndex = -1; // Start with countdown
+    this.countdownSeconds = 3;
     this.allCapturedFrames = [];
-        this.holdStartTime = null;
-        this.stepFrames = [];
-        this.stepStartTime = performance.now();
-        
-        this.setState('running');
+    this.stepFrameCounts.clear();
+    this.holdStartTime = null;
+    this.stepFrames = [];
+    this.isStepComplete = false;
+    this.stepCompleteTime = null;
+    this.stepStartTime = performance.now();
+    
+    this.setState('running');
     this.processFrame();
   }
 
@@ -191,6 +199,23 @@ export class EnrollmentEngine {
     }
 
     const now = performance.now();
+    
+    // Handle countdown intro
+    if (this.currentStepIndex === -1) {
+      this.handleCountdown(now);
+      this.animationFrameId = requestAnimationFrame(this.processFrame);
+      return;
+    }
+    
+    // Handle "Got it" transition delay
+    if (this.isStepComplete && this.stepCompleteTime) {
+      if (now - this.stepCompleteTime >= STEP_COMPLETE_DELAY_MS) {
+        this.advanceStep();
+      }
+      this.animationFrameId = requestAnimationFrame(this.processFrame);
+      return;
+    }
+
     const video = this.videoElement;
     
     try {
@@ -295,13 +320,26 @@ export class EnrollmentEngine {
         
         // Capture frames periodically while holding
         if (now - this.lastCaptureTime >= CAPTURE_INTERVAL_MS) {
-          this.captureFrame(video, landmarks, pose);
+          const captured = this.captureFrame(video, landmarks, pose);
           this.lastCaptureTime = now;
+          
+          // Log capture attempt
+          if (captured) {
+            console.log(`✓ Frame captured for ${currentStep.id}:`, captured.quality.overallScore.toFixed(1), 'quality,', captured.quality.sharpness.toFixed(1), 'sharpness');
+          }
         }
         
         // Check if hold duration met
         if (holdDuration >= HOLD_DURATION_MS) {
-          this.advanceStep();
+          // Always capture at least 1 frame before advancing (best available)
+          if (this.stepFrames.length === 0) {
+            console.warn(`No frames captured for ${currentStep.id}, retrying step...`);
+            this.holdStartTime = null; // Retry the step
+          } else {
+            // Mark step complete
+            this.isStepComplete = true;
+            this.stepCompleteTime = now;
+          }
         }
       } else {
         // Pose not matched, reset hold
@@ -322,11 +360,20 @@ export class EnrollmentEngine {
     video: HTMLVideoElement,
     landmarks: FaceLandmarks,
     pose: HeadPose
-  ): void {
-    if (!this.canvasElement) return;
+  ): CapturedFrame | null {
+    if (!this.canvasElement) {
+      console.error('Canvas element missing');
+      return null;
+    }
     
     const canvas = this.canvasElement;
     const ctx = canvas.getContext('2d')!;
+    
+    // Ensure canvas is sized
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      console.warn('Video not ready (0x0), skipping capture');
+      return null;
+    }
     
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -342,26 +389,84 @@ export class EnrollmentEngine {
     
     const quality = evaluateFrameQuality(imageData, landmarks, eyesOpen);
     
-    if (meetsQualityThreshold(quality)) {
-      const frame: CapturedFrame = {
-        imageData,
-        dataUrl,
-        landmarks,
-        pose,
-        quality,
-        stepId: ENROLLMENT_STEPS[this.currentStepIndex].id,
-        timestamp: Date.now(),
-        yaw: pose.yaw,
-        pitch: pose.pitch
-      };
-      
+    console.log(`Capture attempt: quality=${quality.overallScore.toFixed(1)}, sharpness=${quality.sharpness.toFixed(1)}, yaw=${pose.yaw.toFixed(1)}, pitch=${pose.pitch.toFixed(1)}`);
+    
+    const frame: CapturedFrame = {
+      imageData,
+      dataUrl,
+      landmarks,
+      pose,
+      quality,
+      stepId: ENROLLMENT_STEPS[this.currentStepIndex].id,
+      timestamp: Date.now(),
+      yaw: pose.yaw,
+      pitch: pose.pitch
+    };
+    
+    // Always capture frames, but prioritize good quality ones
+    const isGoodQuality = meetsQualityThreshold(quality) && quality.sharpness >= MIN_SHARPNESS_THRESHOLD;
+    const goodFrameCount = this.stepFrames.filter(f => meetsQualityThreshold(f.quality)).length;
+    
+    // Accept if: it's good quality OR we have < 1 frame OR it's better than worst frame
+    const shouldAccept = isGoodQuality || 
+                         this.stepFrames.length === 0 ||
+                         (goodFrameCount < TARGET_FRAMES_PER_STEP && quality.overallScore > 40);
+    
+    if (shouldAccept) {
       this.stepFrames.push(frame);
       
-      // Keep only best frames
+      // Track frames per step
+      const stepId = ENROLLMENT_STEPS[this.currentStepIndex].id;
+      this.stepFrameCounts.set(stepId, (this.stepFrameCounts.get(stepId) || 0) + 1);
+      
+      // Keep only best frames (up to MAX_FRAMES_PER_STEP)
       if (this.stepFrames.length > MAX_FRAMES_PER_STEP) {
         this.stepFrames.sort((a, b) => b.quality.overallScore - a.quality.overallScore);
         this.stepFrames = this.stepFrames.slice(0, MAX_FRAMES_PER_STEP);
       }
+      
+      return frame;
+    }
+    
+    return null;
+  }
+
+  /**
+   * Handle countdown intro (3-2-1)
+   */
+  private handleCountdown(now: number): void {
+    if (!this.holdStartTime) {
+      this.holdStartTime = now;
+    }
+    
+    const elapsed = now - this.holdStartTime;
+    const secondsElapsed = Math.floor(elapsed / 1000);
+    
+    if (secondsElapsed >= this.countdownSeconds) {
+      // Countdown complete, move to first step
+      this.currentStepIndex = 0;
+      this.holdStartTime = null;
+      this.isStepComplete = false;
+      this.stepCompleteTime = null;
+      this.stepStartTime = now;
+      return;
+    }
+    
+    const remaining = this.countdownSeconds - secondsElapsed;
+    const instruction = remaining > 0 ? `Get ready: ${remaining}` : 'Look straight ahead';
+    
+    if (this.statusCallback) {
+      this.statusCallback({
+        state: this.state,
+        currentStepIndex: 0,
+        currentStepId: 'countdown',
+        instruction,
+        progress: 0,
+        holdProgress: 0,
+        detectedPose: null,
+        faceDetected: false,
+        poseMatched: false
+      });
     }
   }
 
@@ -375,6 +480,8 @@ export class EnrollmentEngine {
     this.holdStartTime = null;
     this.minimumMetTime = null;
     this.bestTurnYaw = 0;
+    this.isStepComplete = false;
+    this.stepCompleteTime = null;
     
     // Move to next step
     this.currentStepIndex++;
@@ -400,6 +507,26 @@ export class EnrollmentEngine {
    */
   private completeEnrollment(): void {
     this.setState('completed');
+    
+    // Log frame capture summary
+    console.log('\n=== Enrollment Complete ===');
+    console.log(`Total frames captured: ${this.allCapturedFrames.length}`);
+    console.log('Frames per step:');
+    ENROLLMENT_STEPS.forEach(step => {
+      const count = this.stepFrameCounts.get(step.id) || 0;
+      const stepFrames = this.allCapturedFrames.filter(f => f.stepId === step.id);
+      const avgQuality = stepFrames.length > 0 
+        ? stepFrames.reduce((sum, f) => sum + f.quality.overallScore, 0) / stepFrames.length
+        : 0;
+      const avgSharpness = stepFrames.length > 0
+        ? stepFrames.reduce((sum, f) => sum + f.quality.sharpness, 0) / stepFrames.length
+        : 0;
+      console.log(`  ${step.id}: ${count} frames (avg quality: ${avgQuality.toFixed(1)}, avg sharpness: ${avgSharpness.toFixed(1)})`);
+    });
+    
+    const usableFrames = this.allCapturedFrames.filter(f => f.quality.overallScore > 50).length;
+    console.log(`Usable frames (quality > 50): ${usableFrames}`);
+    console.log('=========================\n');
     
     // Find best frontal frame
     const frontalFrames = this.allCapturedFrames.filter(f => f.stepId === 'straight');

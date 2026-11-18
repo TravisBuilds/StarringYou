@@ -75,6 +75,55 @@ export class SharedSwapEngine {
   private faceLandmarker: FaceLandmarker | null = null;
   private sourceCache: SourceCacheData | null = null;
   
+  /**
+   * Detect target face pose (yaw/pitch) for frame selection
+   */
+  async detectTargetPose(imageUrl: string): Promise<{ yaw: number; pitch: number } | null> {
+    await this.initialize();
+    
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = reject;
+      img.src = imageUrl;
+    });
+    
+    await img.decode();
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, 0);
+    
+    const result = this.faceLandmarker!.detect(canvas);
+    if (!result.faceLandmarks || result.faceLandmarks.length === 0) {
+      return null;
+    }
+    
+    const landmarks = result.faceLandmarks[0].map(p => ({
+      x: p.x * canvas.width,
+      y: p.y * canvas.height
+    }));
+    
+    // Calculate pose from landmarks
+    const nose = landmarks[1];
+    const leftEye = landmarks[33];
+    const rightEye = landmarks[263];
+    
+    const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+    const noseOffsetX = nose.x - eyeCenterX;
+    const eyeWidth = Math.abs(rightEye.x - leftEye.x);
+    const yaw = -(noseOffsetX / eyeWidth) * 90; // Negated for mirrored coordinates
+    
+    const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+    const noseOffsetY = nose.y - eyeCenterY;
+    const faceHeight = canvas.height * 0.3; // Approximate face height
+    const pitch = (noseOffsetY / faceHeight) * 60;
+    
+    return { yaw, pitch };
+  }
+  
   async initialize(): Promise<void> {
     if (this.faceLandmarker) return;
     
@@ -267,7 +316,7 @@ export class SharedSwapEngine {
     const scale = tgtEyeDist / sourceData.eyeDist;
     const rotation = tgtAngle - sourceData.angle;
     
-    // Create FACE_OVAL mask with brow clamp and 4% shrink
+    // Create FACE_OVAL mask with brow clamp and extended chin
     let tgtFaceOval = FACE_OVAL_INDICES.map(i => tgtLandmarks[i]);
     const tgtBrows = BROW_INDICES.map(i => tgtLandmarks[i]);
     const browMaxY = Math.max(...tgtBrows.map(p => p.y));
@@ -278,10 +327,24 @@ export class SharedSwapEngine {
       y: acc.y + p.y / tgtFaceOval.length
     }), { x: 0, y: 0 });
     
-    tgtFaceOval = tgtFaceOval.map(p => ({
-      x: p.x + (centroid.x - p.x) * 0.04,
-      y: p.y + (centroid.y - p.y) * 0.04
-    }));
+    // 4% shrink, but extend chin/jaw points downward for better coverage
+    tgtFaceOval = tgtFaceOval.map((p, idx) => {
+      // Bottom half of oval (indices 16-36) - chin and jaw region
+      const isLowerFace = idx >= 16 && idx <= 36;
+      const shrinkFactor = isLowerFace ? 0.01 : 0.04; // Less shrink on lower face
+      
+      let adjustedP = {
+        x: p.x + (centroid.x - p.x) * shrinkFactor,
+        y: p.y + (centroid.y - p.y) * shrinkFactor
+      };
+      
+      // Extend chin points downward slightly
+      if (idx >= 25 && idx <= 28) { // Chin center points
+        adjustedP.y += tgtEyeDist * 0.08; // Extend 8% of eye distance down
+      }
+      
+      return adjustedP;
+    });
     
     // Create mask at 1/4 resolution
     const downscale = 4;
@@ -297,8 +360,8 @@ export class SharedSwapEngine {
     smallCtx.closePath();
     smallCtx.fill();
     
-    // 3-pass box blur
-    const featherRadius = Math.max(1, Math.round((tgtEyeDist * 0.06) / downscale));
+    // 3-pass box blur with wider feather radius for softer edges (especially chin/jaw)
+    const featherRadius = Math.max(2, Math.round((tgtEyeDist * 0.10) / downscale)); // Increased from 0.06 to 0.10
     const smallMaskData = smallCtx.getImageData(0, 0, smallMask.width, smallMask.height);
     for (let pass = 0; pass < 3; pass++) {
       boxBlurImageData(smallMaskData, featherRadius);

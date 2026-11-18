@@ -11,10 +11,10 @@ import { isTestModeEnabled, showTestModeIndicator } from './utils/testMode';
 
 // Sample images (real clothing model photos from Unsplash - see CREDITS.txt)
 const SAMPLE_IMAGES = [
-  { id: 'model-1', path: '/sample-images/model-1.jpg', caption: 'Casual Style' },
-  { id: 'model-2', path: '/sample-images/model-2.jpg', caption: 'Business Look' },
-  { id: 'model-3', path: '/sample-images/model-3.jpg', caption: 'Portrait Style' },
-  { id: 'model-4', path: '/sample-images/model-4.jpg', caption: 'Fashion Forward' }
+  { id: 'model-1', path: `${import.meta.env.BASE_URL}sample-images/model-1.jpg`, caption: 'Casual Style' },
+  { id: 'model-2', path: `${import.meta.env.BASE_URL}sample-images/model-2.jpg`, caption: 'Business Look' },
+  { id: 'model-3', path: `${import.meta.env.BASE_URL}sample-images/model-3.jpg`, caption: 'Portrait Style' },
+  { id: 'model-4', path: `${import.meta.env.BASE_URL}sample-images/model-4.jpg`, caption: 'Fashion Forward' }
 ];
 
 class App {
@@ -365,6 +365,36 @@ class App {
       
       sampleGrid.appendChild(card);
     });
+
+    // Add upload option
+    const uploadCard = document.createElement('div');
+    uploadCard.className = 'sample-image-card upload-card';
+    uploadCard.innerHTML = `
+      <div class="upload-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+        </svg>
+      </div>
+      <div class="caption">Upload Your Own</div>
+      <input type="file" id="upload-model-image" accept="image/*" style="display:none;">
+    `;
+    
+    const fileInput = uploadCard.querySelector('#upload-model-image') as HTMLInputElement;
+    uploadCard.addEventListener('click', () => fileInput.click());
+    
+    fileInput.addEventListener('change', async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const dataUrl = e.target?.result as string;
+          this.performSwap(dataUrl);
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+    
+    sampleGrid.appendChild(uploadCard);
 
     // Try another button
     document.getElementById('try-another')?.addEventListener('click', () => {

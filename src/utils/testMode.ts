@@ -115,7 +115,7 @@ export async function getTestStream(): Promise<MediaStream | null> {
   
   // Default test image from samples
   try {
-    return await createImageVideoStream('/sample-images/model-2.jpg');
+    return await createImageVideoStream(`${import.meta.env.BASE_URL}sample-images/model-2.jpg`);
   } catch (error) {
     console.error('Failed to create default test stream:', error);
     return null;

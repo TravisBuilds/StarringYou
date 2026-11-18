@@ -4,17 +4,17 @@
  */
 
 import type { FaceSwapProvider } from '../../types';
-import { V2SwapEngine } from '../V2SwapEngine';
+import { SharedSwapEngine } from '../SharedSwapEngine';
 import type { CapturedFrame } from '../../types';
 
 export class LocalProvider implements FaceSwapProvider {
   readonly name = 'Local (Free)';
   readonly requiresApiKey = false;
-  public swapEngine: V2SwapEngine; // Public for pose detection access
+  public swapEngine: SharedSwapEngine; // Public for pose detection access
   private enrolledFrame: CapturedFrame | null = null;
 
   constructor() {
-    this.swapEngine = new V2SwapEngine();
+    this.swapEngine = new SharedSwapEngine();
   }
 
   isConfigured(): boolean {
@@ -32,28 +32,17 @@ export class LocalProvider implements FaceSwapProvider {
     _sourceFaceData: string | ImageData,
     targetImageData: string | ImageData
   ): Promise<string> {
-    // Convert inputs to ImageData
-    const targetImgData = await this.toImageData(targetImageData);
-    
-    // Must have enrolled frame with landmarks and imageData
     if (!this.enrolledFrame) {
       throw new Error('No enrolled frame set. Call setEnrolledFrame() first.');
     }
     
-    if (!this.enrolledFrame.imageData) {
-      throw new Error('Enrolled frame missing imageData. Cannot perform swap.');
-    }
+    // SharedSwapEngine expects dataUrl strings
+    const targetDataUrl = typeof targetImageData === 'string' 
+      ? targetImageData 
+      : this.imageDataToDataUrl(targetImageData);
     
-    if (!this.enrolledFrame.landmarks) {
-      throw new Error('Enrolled frame missing landmarks. Cannot perform swap.');
-    }
-    
-    console.log('Starting advanced face swap with enrolled frame');
-    const swappedImageData = await this.swapEngine.swapFaces(
-      this.enrolledFrame,
-      targetImgData
-    );
-    return this.imageDataToDataUrl(swappedImageData);
+    console.log('Starting face swap with SharedSwapEngine');
+    return await this.swapEngine.swapFaces(this.enrolledFrame, targetDataUrl);
   }
 
 

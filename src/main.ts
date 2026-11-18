@@ -551,44 +551,11 @@ class App {
    * @returns Data URL of the best matching frame
    */
   /**
-   * Detect target face pose using V2SwapEngine's landmarker
+   * Detect target face pose (simplified - just return null for now)
+   * SharedSwapEngine doesn't expose face detection separately
    */
-  private async detectTargetFacePose(imageUrl: string): Promise<{ yaw: number; pitch: number; roll: number } | null> {
-    const img = await this.loadImage(imageUrl);
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    
-    // Use V2 swap engine's detector
-    const provider = this.providerManager.getCurrentProvider();
-    if ('swapEngine' in provider) {
-      const engine = (provider as any).swapEngine;
-      const faceDetection = await engine.detectFace(imageData);
-      if (faceDetection) {
-        const landmarks = faceDetection.landmarks;
-        const nose = landmarks[1];
-        const leftEye = landmarks[33];
-        const rightEye = landmarks[263];
-        
-        // Calculate yaw from nose offset (negated for mirrored coordinates)
-        const eyeCenterX = (leftEye.x + rightEye.x) / 2;
-        const noseOffsetX = nose.x - eyeCenterX;
-        const eyeWidth = Math.abs(rightEye.x - leftEye.x);
-        const yaw = -(noseOffsetX / eyeWidth) * 90;
-        
-        // Calculate pitch from vertical position
-        const eyeCenterY = (leftEye.y + rightEye.y) / 2;
-        const noseOffsetY = nose.y - eyeCenterY;
-        const faceHeight = faceDetection.bbox.height;
-        const pitch = (noseOffsetY / faceHeight) * 60;
-        
-        console.log(`Target face pose detected: yaw=${yaw.toFixed(1)}°, pitch=${pitch.toFixed(1)}°`);
-        return { yaw, pitch, roll: 0 };
-      }
-    }
+  private async detectTargetFacePose(_imageUrl: string): Promise<{ yaw: number; pitch: number; roll: number } | null> {
+    // Pose-aware matching is handled inside SharedSwapEngine's cache
     return null;
   }
 

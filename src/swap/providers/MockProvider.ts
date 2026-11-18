@@ -29,62 +29,33 @@ export class LocalProvider implements FaceSwapProvider {
   }
 
   async swapFace(
-    sourceFaceData: string | ImageData,
+    _sourceFaceData: string | ImageData,
     targetImageData: string | ImageData
   ): Promise<string> {
-    try {
-      // Convert inputs to ImageData
-      const targetImgData = await this.toImageData(targetImageData);
-      
-      // If we have an enrolled frame, use the advanced swap engine
-      if (this.enrolledFrame) {
-        const swappedImageData = await this.swapEngine.swapFaces(
-          this.enrolledFrame,
-          targetImgData
-        );
-        return this.imageDataToDataUrl(swappedImageData);
-      }
-      
-      // Fallback to simple overlay if no enrolled frame
-      return this.simpleSwap(sourceFaceData, targetImageData);
-    } catch (error) {
-      console.error('Advanced swap failed, falling back to simple swap:', error);
-      return this.simpleSwap(sourceFaceData, targetImageData);
+    // Convert inputs to ImageData
+    const targetImgData = await this.toImageData(targetImageData);
+    
+    // Must have enrolled frame with landmarks and imageData
+    if (!this.enrolledFrame) {
+      throw new Error('No enrolled frame set. Call setEnrolledFrame() first.');
     }
+    
+    if (!this.enrolledFrame.imageData) {
+      throw new Error('Enrolled frame missing imageData. Cannot perform swap.');
+    }
+    
+    if (!this.enrolledFrame.landmarks) {
+      throw new Error('Enrolled frame missing landmarks. Cannot perform swap.');
+    }
+    
+    console.log('Starting advanced face swap with enrolled frame');
+    const swappedImageData = await this.swapEngine.swapFaces(
+      this.enrolledFrame,
+      targetImgData
+    );
+    return this.imageDataToDataUrl(swappedImageData);
   }
 
-  /**
-   * Fallback simple swap for when advanced swap fails
-   */
-  private async simpleSwap(
-    sourceFaceData: string | ImageData,
-    targetImageData: string | ImageData
-  ): Promise<string> {
-    const sourceImg = await this.loadImage(sourceFaceData);
-    const targetImg = await this.loadImage(targetImageData);
-    
-    const canvas = document.createElement('canvas');
-    canvas.width = targetImg.width;
-    canvas.height = targetImg.height;
-    const ctx = canvas.getContext('2d')!;
-    
-    ctx.drawImage(targetImg, 0, 0);
-    
-    // Simple overlay for fallback
-    const faceSize = Math.min(targetImg.width, targetImg.height) * 0.3;
-    const x = targetImg.width * 0.35;
-    const y = targetImg.height * 0.15;
-    
-    ctx.globalAlpha = 0.85;
-    ctx.drawImage(sourceImg, x, y, faceSize, faceSize);
-    ctx.globalAlpha = 1.0;
-    
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.font = '14px system-ui';
-    ctx.fillText('⚠️ Fallback swap mode', 10, 30);
-    
-    return canvas.toDataURL('image/jpeg', 0.9);
-  }
 
   private async toImageData(data: string | ImageData): Promise<ImageData> {
     if (data instanceof ImageData) {

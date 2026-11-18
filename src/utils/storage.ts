@@ -35,17 +35,23 @@ export async function initStorage(): Promise<void> {
 
 /**
  * Save enrollment data
- * Note: Strips ImageData from frames since it's not structured-cloneable
- * and can be reconstructed from dataUrl if needed
+ * Note: Strips ImageData from frames (not needed for swap, uses dataUrl)
+ * Landmarks are kept as plain arrays (structured-cloneable)
  */
 export async function saveEnrollment(data: EnrollmentData): Promise<void> {
   if (!db) await initStorage();
   
-  // Strip ImageData from frames (not structured-cloneable, reconstructable from dataUrl)
+  // Strip ImageData but keep landmarks as plain objects
   const storableData = {
     frames: data.frames.map(frame => ({
       dataUrl: frame.dataUrl,
-      landmarks: frame.landmarks,
+      landmarks: {
+        landmarks: frame.landmarks.landmarks.map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
+        blendshapes: frame.landmarks.blendshapes?.map(bs => ({
+          categoryName: bs.categoryName,
+          score: bs.score
+        }))
+      },
       pose: frame.pose,
       quality: frame.quality,
       stepId: frame.stepId,
@@ -55,7 +61,13 @@ export async function saveEnrollment(data: EnrollmentData): Promise<void> {
     })),
     bestFrontalFrame: data.bestFrontalFrame ? {
       dataUrl: data.bestFrontalFrame.dataUrl,
-      landmarks: data.bestFrontalFrame.landmarks,
+      landmarks: {
+        landmarks: data.bestFrontalFrame.landmarks.landmarks.map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
+        blendshapes: data.bestFrontalFrame.landmarks.blendshapes?.map(bs => ({
+          categoryName: bs.categoryName,
+          score: bs.score
+        }))
+      },
       pose: data.bestFrontalFrame.pose,
       quality: data.bestFrontalFrame.quality,
       stepId: data.bestFrontalFrame.stepId,
@@ -84,38 +96,39 @@ export async function saveEnrollment(data: EnrollmentData): Promise<void> {
 
 /**
  * Load enrollment data
- * Note: Loaded frames won't have imageData (stripped during save),
- * but it can be reconstructed from dataUrl if needed
+ * Note: Loaded frames won't have imageData (stripped during save)
+ * ImageData will be reconstructed from dataUrl when needed for swap
  */
 export async function loadEnrollment(): Promise<EnrollmentData | null> {
   if (!db) await initStorage();
   
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const transaction = db!.transaction([STORE_NAME], 'readonly');
     const store = transaction.objectStore(STORE_NAME);
     const request = store.get('current');
     
-    request.onsuccess = () => {
+    request.onsuccess = async () => {
       const result = request.result;
       if (result) {
         const { id, ...data } = result;
         console.log('Loaded enrollment from IndexedDB:', {
           frameCount: data.frames?.length || 0,
           hasBestFrontal: !!data.bestFrontalFrame,
+          hasLandmarks: data.frames?.[0]?.landmarks != null,
           completedAt: data.completedAt
         });
         
-        // Add placeholder imageData (not needed for swap, uses dataUrl)
+        // Reconstruct ImageData from dataUrl for each frame
         if (data.frames) {
-          data.frames = data.frames.map((f: any) => ({
+          data.frames = await Promise.all(data.frames.map(async (f: any) => ({
             ...f,
-            imageData: null as any // Placeholder, actual swap uses dataUrl
-          }));
+            imageData: await dataUrlToImageData(f.dataUrl)
+          })));
         }
         if (data.bestFrontalFrame) {
           data.bestFrontalFrame = {
             ...data.bestFrontalFrame,
-            imageData: null as any
+            imageData: await dataUrlToImageData(data.bestFrontalFrame.dataUrl)
           };
         }
         
@@ -129,6 +142,25 @@ export async function loadEnrollment(): Promise<EnrollmentData | null> {
       console.error('IndexedDB get error:', request.error);
       reject(request.error);
     };
+  });
+}
+
+/**
+ * Convert dataUrl back to ImageData
+ */
+async function dataUrlToImageData(dataUrl: string): Promise<ImageData> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0);
+      resolve(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
   });
 }
 

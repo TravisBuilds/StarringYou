@@ -4,7 +4,7 @@
 
 import './style.css';
 import { EnrollmentEngine } from './enrollment/EnrollmentEngine';
-import type { EnrollmentData } from './types';
+import type { EnrollmentData, CapturedFrame } from './types';
 import { saveEnrollment, loadEnrollment, deleteEnrollment, createEnrollmentZip, downloadBlob } from './utils/storage';
 import { ProviderManager } from './swap/ProviderManager';
 import { isTestModeEnabled, showTestModeIndicator } from './utils/testMode';
@@ -432,13 +432,15 @@ class App {
       statusEl.className = 'enrollment-status error';
       statusEl.innerHTML = '⚠️ Enrollment incomplete: no frames captured.';
     } else {
-      const usableFrames = this.enrollmentData.frames.filter(f => f.quality.overallScore > 50).length;
-      if (usableFrames === 0) {
+      // Check for frames with valid data (dataUrl at minimum)
+      const validFrames = this.enrollmentData.frames.filter(f => f.dataUrl && f.dataUrl.length > 0);
+      if (validFrames.length === 0) {
         statusEl.className = 'enrollment-status error';
-        statusEl.innerHTML = `⚠️ No usable frames (all quality scores too low). Please re-enroll.`;
+        statusEl.innerHTML = `⚠️ No valid frames found. Please re-enroll.`;
       } else {
+        const usableFrames = validFrames.filter(f => f.quality.overallScore > 50).length;
         statusEl.className = 'enrollment-status success';
-        statusEl.innerHTML = `✅ Enrolled (${usableFrames} usable frame${usableFrames !== 1 ? 's' : ''})`;
+        statusEl.innerHTML = `✅ Enrolled (${validFrames.length} frame${validFrames.length !== 1 ? 's' : ''}, ${usableFrames} high quality)`;
       }
     }
   }
@@ -475,24 +477,52 @@ class App {
     try {
       // Select best frame based on target pose (for now, use best frontal)
       // TODO: Detect target face pose and select matching enrolled frame
-      const sourceFace = this.selectBestSourceFrame(this.enrollmentData, 0, 0);
-      const swappedImage = await this.providerManager.swapFace(sourceFace, targetImagePath);
+      const bestFrame = this.selectBestSourceFrame(this.enrollmentData, 0, 0);
+      
+      if (!bestFrame) {
+        throw new Error('No suitable frame found for swap');
+      }
+      
+      // Set enrolled frame on Local provider if that's what we're using
+      const currentProvider = this.providerManager.getCurrentProvider();
+      if ('setEnrolledFrame' in currentProvider) {
+        (currentProvider as any).setEnrolledFrame(bestFrame);
+        console.log('Set enrolled frame:', {
+          hasImageData: !!bestFrame.imageData,
+          hasLandmarks: !!bestFrame.landmarks,
+          pose: bestFrame.pose
+        });
+      }
+      
+      const swappedImage = await this.providerManager.swapFace(bestFrame.dataUrl, targetImagePath);
 
       // Display results
-      (document.getElementById('enrolled-face-img') as HTMLImageElement).src = sourceFace;
+      (document.getElementById('enrolled-face-img') as HTMLImageElement).src = bestFrame.dataUrl;
       (document.getElementById('target-model-img') as HTMLImageElement).src = targetImagePath;
       (document.getElementById('swapped-result-img') as HTMLImageElement).src = swappedImage;
       
-      const provider = this.providerManager.getCurrentProvider();
-      const costInfo = provider.getCostEstimate?.() || '';
+      const costInfo = currentProvider.getCostEstimate?.() || '';
       document.getElementById('swap-provider-info')!.textContent = 
-        `Provider: ${provider.name}${costInfo ? ' • ' + costInfo : ''}`;
+        `Provider: ${currentProvider.name}${costInfo ? ' • ' + costInfo : ''}`;
 
       loadingEl.style.display = 'none';
       resultEl.style.display = 'block';
     } catch (error: any) {
       loadingEl.style.display = 'none';
-      alert(`Swap failed: ${error.message}`);
+      
+      // Show error message
+      const errorMsg = error.message || 'Unknown error';
+      console.error('Swap error:', error);
+      
+      // Display error in UI instead of alert
+      resultEl.innerHTML = `
+        <div style="padding: 20px; text-align: center;">
+          <h3 style="color: #d32f2f;">Face Swap Failed</h3>
+          <p>${errorMsg}</p>
+          <p style="font-size: 0.9em; color: #666;">Check the console for details.</p>
+        </div>
+      `;
+      resultEl.style.display = 'block';
     }
   }
 
@@ -507,9 +537,9 @@ class App {
     data: EnrollmentData,
     targetYaw: number,
     targetPitch: number
-  ): string {
+  ): CapturedFrame | null {
     if (!data.frames || data.frames.length === 0) {
-      return data.bestFrontalFrame?.dataUrl || '';
+      return data.bestFrontalFrame || null;
     }
 
     // Find frame with closest pose match
@@ -528,8 +558,11 @@ class App {
       }
     }
 
-    console.log(`Selected frame with yaw=${bestFrame?.yaw.toFixed(1)}, pitch=${bestFrame?.pitch.toFixed(1)} for target yaw=${targetYaw}, pitch=${targetPitch}`);
-    return bestFrame?.dataUrl || data.bestFrontalFrame?.dataUrl || '';
+    const result = bestFrame || data.bestFrontalFrame || null;
+    if (result) {
+      console.log(`Selected frame: yaw=${result.yaw.toFixed(1)}, pitch=${result.pitch.toFixed(1)}, quality=${result.quality.overallScore.toFixed(1)}`);
+    }
+    return result;
   }
 
   private setupSettingsView(): void {
